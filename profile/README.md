@@ -4,12 +4,13 @@ I am an official Tatar Proofreader and Translator for various Games, its Mods, P
 Was known as MTTCD's (Minecraft Translators of Turkic [languages that use] Cyrillic [script] Direction) Cooperator.
 Also know Russian well, so I can participate in Russian Translations as well.
 My Pros are:
+- Can work with Translation Platforms like Crowdin, Transifex, Weblate. Also in some Cases Products are being translated via GitHub.
 - Trying to unify Translations under the same Terms (to bring consistency between any Game and its Mods),
 - Actually knowing or asking-if-not-knowing the Contexts of a Strings (to translate Strings as accurate as possible).
 My Cons are:
 - Procrastination (or Lazyness),
 - Unable to focus on a Process for a long Time without any Breaks.
-Can work with Translation Platforms like Crowdin, Transifex, Weblate. Also in some Cases Mods of Games are being translated via GitHub.
+You can track My Plans, Progress, etc. at the Dedicated ["Kanban Board"](https://github.com/users/Amirhan-Taipovjan-Greatest-I/projects/3).
 ### Tatar Proofreader.
 Currently a Proofreader for Tatar Language on such official Projects as:
 - the Minecraft Game (and its Launcher),
