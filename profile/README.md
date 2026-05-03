@@ -1,6 +1,7 @@
 # About Me.
 ## Translations.
-I am official Tatar Proofreader and Translator for various Games, its Mods, Programs, Sites, etc. Also a fan Tatar Proofreader and Translator.
+I am an official Tatar Proofreader and Translator for various Games, its Mods, Programs, Sites, etc. Also a fan Tatar Proofreader and Translator.
+Was known as MTTCD's (Minecraft Translators of Turkic [languages that use] Cyrillic [script] Direction) Cooperator.
 Also know Russian well, so I can participate in Russian Translations as well.
 My Pros are:
 - Trying to unify Translations under the same Terms (to bring consistency between any Game and its Mods),
@@ -15,8 +16,9 @@ Currently a Proofreader for Tatar Language on such official Projects as:
 - NameMC Site,
 - BOINC Program and Site.
 And such fan Projects as:
-- Yume Nikki Translation Mod,
-- Team Fortress 2 Translation "Mod".
+- [Yume Nikki Translation Mod](https://github.com/Amirhan-Taipovjan-Greatest-I/unofficial-tatar-yume-nikki-translation),
+- [Steam Translations](https://github.com/Amirhan-Taipovjan-Greatest-I/unofficial-tatar-steam-translations),
+- [Team Fortress 2 Translation "Mod"](https://github.com/Amirhan-Taipovjan-Greatest-I/unofficial-tatar-steam-translations).
 ### Tatar Translator.
 Currently a Translator for Tatar Language on such official Projects as:
 - Aternos GmbH's (Aternos and Exaroton Services/Sites),
