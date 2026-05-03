@@ -32,7 +32,7 @@ Currently a Translator for Tatar Language on such ⏳💯official Projects as:
 - ⏳Fabric Modloader,
 - Minecraft Mods:
 - - ⏳Fabric API,
-- - Libraries like ⏳Cloth Config, ⏳MidnightLib, 💯owo-lib, 💯YACL,
+- - Libraries like ⏳Cloth Config, ⏳lazy-language-loaderCompleteConfig ⏳MidnightLib, 💯owo-lib, 💯YACL,
 - - ⏳ModMenu,
 - - ⏳Language Reload,
 - - ⏳CIT Resewn,
@@ -41,9 +41,13 @@ Currently a Translator for Tatar Language on such ⏳💯official Projects as:
 - - 💯Plasmo Voice (and its 💯Addons) and ⏳Simple Voice Chat,
 - - ⏳Peek,
 - - 💯Stendhal,
+- - ⏳Screenshot Viewer,
+- - ⏳ViaFabric,
+- - 💯Status,
+- - 💯VoiceMessages,
 - - [More research is needed]
 - Minecraft Plugins:
-- - ⏳GSit,
+- - 💯GSit,
 - - 💯EastZombies,
 - - ⏳SkinsRestorer.
 - ⏳SearXNG Web App,
