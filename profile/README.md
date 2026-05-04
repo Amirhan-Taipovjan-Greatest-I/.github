@@ -46,6 +46,7 @@ Currently a Translator for Tatar Language on such ⏳💯official Projects as:
 - - 💯Status,
 - - 💯VoiceMessages,
 - - 💯Vanilla Notebook,
+- - 💯WaveyCapes,
 - - [More research is needed]
 - Minecraft Plugins:
 - - 💯GSit,
