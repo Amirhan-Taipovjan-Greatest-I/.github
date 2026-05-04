@@ -23,7 +23,7 @@ Currently a Proofreader for Tatar Language on such ⏳💯official Projects as:
 
 And such ⏳fan Projects as:
 - ⏳[Yume Nikki Translation Mod](https://github.com/Amirhan-Taipovjan-Greatest-I/unofficial-tatar-yume-nikki-translation),
-- ⏳[Steam Translations](https://github.com/Amirhan-Taipovjan-Greatest-I/unofficial-tatar-steam-translations),
+- ⏳[Steam's Tatar Translations](https://github.com/Amirhan-Taipovjan-Greatest-I/unofficial-tatar-steam-translations),
 - ⏳[Team Fortress 2 Translation "Mod"](https://github.com/Amirhan-Taipovjan-Greatest-I/unofficial-tatar-steam-translations).
 ### Tatar Translator.
 Currently a Translator for Tatar Language on such ⏳💯official Projects as:
@@ -32,7 +32,7 @@ Currently a Translator for Tatar Language on such ⏳💯official Projects as:
 - ⏳Fabric Modloader,
 - Minecraft Mods:
 - - ⏳Fabric API,
-- - Libraries like ⏳Cloth Config, ⏳lazy-language-loaderCompleteConfig ⏳MidnightLib, 💯owo-lib, 💯YACL,
+- - Libraries like ⏳Cloth Config, ⏳lazy-language-loader, ⏳CompleteConfig ⏳MidnightLib, 💯owo-lib, 💯YACL,
 - - ⏳ModMenu,
 - - ⏳Language Reload,
 - - ⏳CIT Resewn,
@@ -45,6 +45,7 @@ Currently a Translator for Tatar Language on such ⏳💯official Projects as:
 - - ⏳ViaFabric,
 - - 💯Status,
 - - 💯VoiceMessages,
+- - 💯Vanilla Notebook,
 - - [More research is needed]
 - Minecraft Plugins:
 - - 💯GSit,
