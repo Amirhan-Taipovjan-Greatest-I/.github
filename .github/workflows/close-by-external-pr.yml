@@ -2,104 +2,100 @@ name: Close issues when external PRs merge
 
 on:
   schedule:
-    - cron: '0 */1 * * *'   # every hour
+    - cron: '0 */1 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
   issues: write
-  pull-requests: write
 
 jobs:
   check-prs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Close issues with merged external PRs
+      - name: Close issues linked to merged external PRs
         uses: actions/github-script@v7
         with:
           script: |
-              const ISSUE_OWNER = context.repo.owner;
-              const ISSUE_REPO = context.repo.repo;
-              
-              console.log(`Checking repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
-              
-              const issues = await github.paginate(
-                github.rest.issues.listForRepo,
+            const ISSUE_OWNER = context.repo.owner;
+            const ISSUE_REPO = context.repo.repo;
+
+            console.log(`Checking repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
+
+            const issues = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner: ISSUE_OWNER,
+                repo: ISSUE_REPO,
+                state: 'open',
+              }
+            );
+
+            console.log(`Found ${issues.length} open issues`);
+
+            for (const issue of issues) {
+
+              console.log(`\nChecking issue #${issue.number}`);
+
+              // ✅ Get timeline events
+              const timeline = await github.paginate(
+                github.rest.issues.listEventsForTimeline,
                 {
                   owner: ISSUE_OWNER,
                   repo: ISSUE_REPO,
-                  state: 'open',
+                  issue_number: issue.number,
+                  mediaType: {
+                    previews: ["mockingbird"]  // required for timeline API
+                  }
                 }
               );
-              
-              console.log(`Found ${issues.length} open issues`);
-              
-              // ✅ Match ALL possible PR reference formats
-              const patterns = [
-                /https?:\/\/github\.com\/([^\/\s]+)\/([^\/\s]+)\/pull\/(\d+)/gi,
-                /github\.com\/([^\/\s]+)\/([^\/\s]+)\/pull\/(\d+)/gi,
-                /([^\/\s]+)\/([^\/\s]+)#(\d+)/gi,
-              ];
-              
-              for (const issue of issues) {
-                const body = issue.body || "";
-              
-                console.log(`\nChecking issue #${issue.number}`);
-              
-                for (const prPattern of patterns) {
-                  let match;
-              
-                  while ((match = prPattern.exec(body)) !== null) {
-              
-                    let prOwner, prRepo, prNumber;
-              
-                    if (prPattern.source.includes('#')) {
-                      // owner/repo#123 format
-                      prOwner = match[1];
-                      prRepo = match[2];
-                      prNumber = match[3];
-                    } else {
-                      prOwner = match[1];
-                      prRepo = match[2];
-                      prNumber = match[3];
-                    }
-              
-                    console.log(`Found PR reference: ${prOwner}/${prRepo}#${prNumber}`);
-              
-                    try {
-                      const response = await fetch(
-                        `https://api.github.com/repos/${prOwner}/${prRepo}/pulls/${prNumber}`,
-                        {
-                          headers: { 'Accept': 'application/vnd.github+json' }
-                        }
-                      );
-              
-                      if (!response.ok) {
-                        console.log(`Cannot access PR ${prOwner}/${prRepo}#${prNumber} (status ${response.status})`);
-                        continue;
+
+              for (const event of timeline) {
+
+                if (event.event === "cross-referenced" && event.source?.issue?.pull_request) {
+
+                  const pr = event.source.issue;
+                  const prOwner = pr.repository.owner.login;
+                  const prRepo = pr.repository.name;
+                  const prNumber = pr.number;
+
+                  console.log(`Found linked PR: ${prOwner}/${prRepo}#${prNumber}`);
+
+                  try {
+                    const response = await fetch(
+                      `https://api.github.com/repos/${prOwner}/${prRepo}/pulls/${prNumber}`,
+                      {
+                        headers: { 'Accept': 'application/vnd.github+json' }
                       }
-              
-                      const pr = await response.json();
-              
-                      console.log(`PR state: ${pr.state}, merged: ${pr.merged}`);
-              
-                      if (pr.merged === true) {
-                        await github.rest.issues.update({
-                          owner: ISSUE_OWNER,
-                          repo: ISSUE_REPO,
-                          issue_number: issue.number,
-                          state: "closed",
-                        });
-              
-                        console.log(`✅ Closed issue #${issue.number}`);
-                        break;
-                      }
-              
-                    } catch (error) {
-                      console.log(`Error checking PR ${prOwner}/${prRepo}#${prNumber}`);
-                      console.log(error.message);
+                    );
+
+                    if (!response.ok) {
+                      console.log(`Cannot access PR ${prOwner}/${prRepo}#${prNumber}`);
+                      continue;
                     }
+
+                    const prData = await response.json();
+
+                    console.log(`PR state: ${prData.state}, merged: ${prData.merged}`);
+
+                    if (prData.merged === true) {
+
+                      await github.rest.issues.update({
+                        owner: ISSUE_OWNER,
+                        repo: ISSUE_REPO,
+                        issue_number: issue.number,
+                        state: "closed",
+                      });
+
+                      console.log(`✅ Closed issue #${issue.number}`);
+                      break;
+                    }
+
+                  } catch (error) {
+                    console.log(`Error checking PR ${prOwner}/${prRepo}#${prNumber}`);
+                    console.log(error.message);
                   }
                 }
               }
+            }
