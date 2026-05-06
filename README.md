@@ -25,10 +25,10 @@ Discussions of this Repo should be treated like a Forum Platform:
 # GitHub Actions Workflow.
 
 Has the Special Workflow that helps auto-close Issues when linked external PRs are being closed. Also auto-updates their Project Status by My Scheme:
-0. a. Issue with a Draft PR, but with "Backlog"/"Ready"/"In Process" Status -> Stays there;
+1. a. Issue with a Draft PR, but with "Backlog"/"Ready"/"In Process" Status -> Stays there;
    b. Issue with a Draft PR, but with "In Review" Status -> Updates to "In Process";
-1. a. Issue with a Multiple PRs, but at least one of them is a Draft (all others are Opened or Merged) -> Moves to "In Process" if is in "In Review";
+2. a. Issue with a Multiple PRs, but at least one of them is a Draft (all others are Opened or Merged) -> Moves to "In Process" if is in "In Review";
    b. Issue with a Multiple PRs, but at least one of them is Opened (all others are Merged) -> Moves to "In Review" if isn't there;
-2. Issue with a Merged PR(s only) -> Auto-Closes itself, and thus moves to "Done" by Default GitHub Project Workflow.
+3. Issue with a Merged PR(s only) -> Auto-Closes itself, and thus moves to "Done" by Default GitHub Project Workflow.
 
 These Conditions are being checked once in an Hour (full Issue List Checking) or when an Issue changes or Comments are being sent/edited in there (runs only for that mentioned Issue).
