@@ -51,7 +51,8 @@ jobs:
                     break;
                   }
                 } catch (e) {
-                  console.log(`Skipping ${prOwner}/${prRepo}#${prNumber}: ${e.message}`);
+                  console.log(`Cannot access ${prOwner}/${prRepo}#${prNumber}`);
+                  console.log(e.message);
                 }
               }
             }
