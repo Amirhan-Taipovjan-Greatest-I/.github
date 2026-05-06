@@ -72,7 +72,7 @@ jobs:
             const STATUS_FIELD_ID = statusField.id;
 
             const IN_PROGRESS_OPTION_ID =
-              statusField.options.find(o => o.name === "In progress")?.id;
+              statusField.options.find(o => o.name === "In Progress")?.id;
 
             const IN_REVIEW_OPTION_ID =
               statusField.options.find(o => o.name === "In Review")?.id;
