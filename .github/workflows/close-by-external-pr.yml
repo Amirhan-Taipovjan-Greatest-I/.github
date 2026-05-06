@@ -1,65 +1,62 @@
-name: Close issues when external PRs close
+name: Close issues when external PRs merge
 
 on:
   schedule:
-    - cron: '0 */1 * * *'  # every 1 hour
+    - cron: '0 */1 * * *'   # every hour
   workflow_dispatch:
 
 permissions:
   contents: read
   issues: write
-  pull-requests: read
 
 jobs:
   check-prs:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Close issues with closed external PRs
+      - name: Close issues with merged external PRs
         uses: actions/github-script@v7
         with:
           script: |
-            const issues = await github.paginate(github.rest.issues.listForRepo, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-            });
+            const ISSUE_OWNER = context.repo.owner;
+            const ISSUE_REPO = context.repo.repo;
 
-            const prPattern = /https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/g;
+            console.log(`Checking repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
+
+            const issues = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner: ISSUE_OWNER,
+                repo: ISSUE_REPO,
+                state: 'open',
+              }
+            );
+
+            console.log(`Found ${issues.length} open issues`);
+
+            // ✅ Robust PR URL matcher
+            const prPattern = /(?:https?:\/\/)?github\.com\/([^\/\s]+)\/([^\/\s]+)\/pull\/(\d+)/gi;
 
             for (const issue of issues) {
-              const body = issue.body || '';
-              let match;
+              const body = issue.body || "";
 
+              console.log(`\nChecking issue #${issue.number}`);
+
+              let match;
               while ((match = prPattern.exec(body)) !== null) {
+
                 const [, prOwner, prRepo, prNumber] = match;
+
+                console.log(`Found PR reference: ${prOwner}/${prRepo}#${prNumber}`);
 
                 try {
                   const response = await fetch(
-                    `https://api.github.com/repos/${prOwner}/${prRepo}/pulls/${prNumber}`
+                    `https://api.github.com/repos/${prOwner}/${prRepo}/pulls/${prNumber}`,
+                    {
+                      headers: {
+                        'Accept': 'application/vnd.github+json'
+                      }
+                    }
                   );
 
                   if (!response.ok) {
-                    console.log(`Cannot access ${prOwner}/${prRepo}#${prNumber}`);
-                    continue;
-                  }
-
-                  const pr = await response.json();
-
-                  if (pr.merged === true) {
-                    await github.rest.issues.update({
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      issue_number: issue.number,
-                      state: 'closed',
-                    });
-
-                    console.log(`Closed issue #${issue.number}`);
-                    break;
-                  }
-
-                } catch (e) {
-                  console.log(`Error checking ${prOwner}/${prRepo}#${prNumber}`);
-                  console.log(e.message);
-                }
-              }
-            }
