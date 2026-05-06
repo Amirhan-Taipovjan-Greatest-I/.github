@@ -2,16 +2,17 @@ name: Close issues when external PRs close
 
 on:
   schedule:
-    - cron: '0 */1 * * *'  # every 1 hours
+    - cron: '0 */1 * * *'  # every 1 hour
   workflow_dispatch:
 
 jobs:
   check-prs:
     runs-on: ubuntu-latest
     permissions:
+        contents: write
         issues: write
-        repository-projects: write
         pull-requests: write
+        repository-projects: write
     steps:
       - name: Close issues with closed external PRs
         uses: actions/github-script@v7
