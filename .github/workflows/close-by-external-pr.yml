@@ -28,12 +28,9 @@ jobs:
             const ISSUE_REPO = context.repo.repo;
             const PROJECT_NUMBER = 3;
 
-            // ✅ Create SECOND authenticated client using PAT
             const userOctokit = new github.constructor({
               auth: process.env.USER_PROJECT_TOKEN
             });
-
-            console.log(`Repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
 
             // ✅ Resolve USER Project
             const projectData = await github.graphql(`
@@ -74,6 +71,16 @@ jobs:
 
             const STATUS_FIELD_ID = statusField.id;
 
+            const BACKLOG_OPTION_ID =
+              statusField.options?.find(o =>
+                o.name?.toLowerCase() === "backlog"
+              )?.id;
+
+            const READY_OPTION_ID =
+              statusField.options?.find(o =>
+                o.name?.toLowerCase() === "ready"
+              )?.id;
+
             const IN_PROGRESS_OPTION_ID =
               statusField.options?.find(o =>
                 o.name?.toLowerCase().includes("progress")
@@ -86,7 +93,7 @@ jobs:
 
             if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) return;
 
-            // ✅ Pagination for unlimited project size
+            // ✅ Fetch ALL project items (pagination)
             async function getAllProjectItems(projectId) {
               let hasNextPage = true;
               let endCursor = null;
@@ -147,73 +154,132 @@ jobs:
                 }
               );
 
-              for (const event of timeline) {
+              // ✅ Collect linked PRs
+              const linkedPRs = timeline
+                .filter(e => e.event === "cross-referenced" && e.source?.issue?.pull_request)
+                .map(e => e.source.issue);
 
-                if (event.event === "cross-referenced" && event.source?.issue?.pull_request) {
+              if (linkedPRs.length === 0) continue;
 
-                  const pr = event.source.issue;
+              let anyMerged = false;
+              let anyReady = false;
+              let allDraft = true;
 
-                  let prData;
+              for (const pr of linkedPRs) {
 
-                  try {
-                    const result = await github.request(
-                      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
-                      {
-                        owner: pr.repository.owner.login,
-                        repo: pr.repository.name,
-                        pull_number: pr.number,
-                      }
-                    );
-                    prData = result.data;
-                  } catch {
-                    continue;
-                  }
+                let prData;
 
-                  // ✅ Close if merged
-                  if (prData.merged) {
-                    await github.rest.issues.update({
-                      owner: ISSUE_OWNER,
-                      repo: ISSUE_REPO,
-                      issue_number: issue.number,
-                      state: "closed",
-                    });
-                    break;
-                  }
-
-                  const targetOptionId =
-                    prData.draft
-                      ? IN_PROGRESS_OPTION_ID
-                      : IN_REVIEW_OPTION_ID;
-
-                  const projectItem =
-                    projectItems.find(
-                      item => item.content?.id === issue.node_id
-                    );
-
-                  if (!projectItem) continue;
-
-                  // ✅ PAT‑authenticated mutation
-                  await userOctokit.graphql(`
-                    mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $optionId:String!) {
-                      updateProjectV2ItemFieldValue(
-                        input:{
-                          projectId:$projectId
-                          itemId:$itemId
-                          fieldId:$fieldId
-                          value:{ singleSelectOptionId:$optionId }
-                        }
-                      ) {
-                        projectV2Item { id }
-                      }
+                try {
+                  const result = await github.request(
+                    "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+                    {
+                      owner: pr.repository.owner.login,
+                      repo: pr.repository.name,
+                      pull_number: pr.number,
                     }
-                  `, {
-                    projectId: PROJECT_ID,
-                    itemId: projectItem.id,
-                    fieldId: STATUS_FIELD_ID,
-                    optionId: targetOptionId
-                  });
+                  );
+                  prData = result.data;
+                } catch {
+                  continue;
+                }
 
-                  console.log(`✅ Updated status for issue #${issue.number}`);
+                if (prData.merged) {
+                  anyMerged = true;
+                  break;
+                }
+
+                if (!prData.draft) {
+                  anyReady = true;
+                  allDraft = false;
                 }
               }
+
+              if (anyMerged) {
+                await github.rest.issues.update({
+                  owner: ISSUE_OWNER,
+                  repo: ISSUE_REPO,
+                  issue_number: issue.number,
+                  state: "closed",
+                });
+                console.log(`✅ Closed issue #${issue.number}`);
+                continue;
+              }
+
+              const projectItem =
+                projectItems.find(
+                  item => item.content?.id === issue.node_id
+                );
+
+              if (!projectItem) continue;
+
+              // ✅ Get current status
+              const itemData = await github.graphql(`
+                query($itemId: ID!) {
+                  node(id: $itemId) {
+                    ... on ProjectV2Item {
+                      fieldValues(first: 20) {
+                        nodes {
+                          ... on ProjectV2ItemFieldSingleSelectValue {
+                            field { ... on ProjectV2SingleSelectField { id } }
+                            name
+                            optionId
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              `, { itemId: projectItem.id });
+
+              const currentStatusValue = itemData.node.fieldValues.nodes
+                .find(v => v.field?.id === STATUS_FIELD_ID);
+
+              const currentStatusOptionId = currentStatusValue?.optionId;
+              const currentStatusName = currentStatusValue?.name?.toLowerCase();
+
+              let targetOptionId = null;
+
+              // ✅ STATE MACHINE
+
+              if (allDraft) {
+                // Draft PR case
+                if (currentStatusName === "in review") {
+                  targetOptionId = IN_PROGRESS_OPTION_ID;
+                }
+                // Backlog / Ready → do nothing
+              } else if (anyReady) {
+                // Ready PR case
+                if (
+                  currentStatusOptionId === BACKLOG_OPTION_ID ||
+                  currentStatusOptionId === READY_OPTION_ID ||
+                  currentStatusOptionId === IN_PROGRESS_OPTION_ID
+                ) {
+                  targetOptionId = IN_REVIEW_OPTION_ID;
+                }
+              }
+
+              if (!targetOptionId) continue;
+              if (currentStatusOptionId === targetOptionId) continue;
+
+              await userOctokit.graphql(`
+                mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $optionId:String!) {
+                  updateProjectV2ItemFieldValue(
+                    input:{
+                      projectId:$projectId
+                      itemId:$itemId
+                      fieldId:$fieldId
+                      value:{ singleSelectOptionId:$optionId }
+                    }
+                  ) {
+                    projectV2Item { id }
+                  }
+                }
+              `, {
+                projectId: PROJECT_ID,
+                itemId: projectItem.id,
+                fieldId: STATUS_FIELD_ID,
+                optionId: targetOptionId
+              });
+
+              console.log(`✅ Updated status for issue #${issue.number}`);
             }
