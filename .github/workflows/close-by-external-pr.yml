@@ -19,72 +19,87 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const ISSUE_OWNER = context.repo.owner;
-            const ISSUE_REPO = context.repo.repo;
-
-            console.log(`Checking repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
-
-            const issues = await github.paginate(
-              github.rest.issues.listForRepo,
-              {
-                owner: ISSUE_OWNER,
-                repo: ISSUE_REPO,
-                state: 'open',
-              }
-            );
-
-            console.log(`Found ${issues.length} open issues`);
-
-            // ✅ Robust PR URL matcher
-            const prPattern = /(?:https?:\/\/)?github\.com\/([^\/\s]+)\/([^\/\s]+)\/pull\/(\d+)/gi;
-
-            for (const issue of issues) {
-              const body = issue.body || "";
-
-              console.log(`\nChecking issue #${issue.number}`);
-
-              let match;
-              while ((match = prPattern.exec(body)) !== null) {
-
-                const [, prOwner, prRepo, prNumber] = match;
-
-                console.log(`Found PR reference: ${prOwner}/${prRepo}#${prNumber}`);
-
-                try {
-                  const response = await fetch(
-                    `https://api.github.com/repos/${prOwner}/${prRepo}/pulls/${prNumber}`,
-                    {
-                      headers: {
-                        'Accept': 'application/vnd.github+json'
-                      }
+              const ISSUE_OWNER = context.repo.owner;
+              const ISSUE_REPO = context.repo.repo;
+              
+              console.log(`Checking repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
+              
+              const issues = await github.paginate(
+                github.rest.issues.listForRepo,
+                {
+                  owner: ISSUE_OWNER,
+                  repo: ISSUE_REPO,
+                  state: 'open',
+                }
+              );
+              
+              console.log(`Found ${issues.length} open issues`);
+              
+              // ✅ Match ALL possible PR reference formats
+              const patterns = [
+                /https?:\/\/github\.com\/([^\/\s]+)\/([^\/\s]+)\/pull\/(\d+)/gi,
+                /github\.com\/([^\/\s]+)\/([^\/\s]+)\/pull\/(\d+)/gi,
+                /([^\/\s]+)\/([^\/\s]+)#(\d+)/gi,
+              ];
+              
+              for (const issue of issues) {
+                const body = issue.body || "";
+              
+                console.log(`\nChecking issue #${issue.number}`);
+              
+                for (const prPattern of patterns) {
+                  let match;
+              
+                  while ((match = prPattern.exec(body)) !== null) {
+              
+                    let prOwner, prRepo, prNumber;
+              
+                    if (prPattern.source.includes('#')) {
+                      // owner/repo#123 format
+                      prOwner = match[1];
+                      prRepo = match[2];
+                      prNumber = match[3];
+                    } else {
+                      prOwner = match[1];
+                      prRepo = match[2];
+                      prNumber = match[3];
                     }
-                  );
-
-                  if (!response.ok) {
-                    console.log(`Cannot access PR ${prOwner}/${prRepo}#${prNumber} (status ${response.status})`);
-                    continue;
+              
+                    console.log(`Found PR reference: ${prOwner}/${prRepo}#${prNumber}`);
+              
+                    try {
+                      const response = await fetch(
+                        `https://api.github.com/repos/${prOwner}/${prRepo}/pulls/${prNumber}`,
+                        {
+                          headers: { 'Accept': 'application/vnd.github+json' }
+                        }
+                      );
+              
+                      if (!response.ok) {
+                        console.log(`Cannot access PR ${prOwner}/${prRepo}#${prNumber} (status ${response.status})`);
+                        continue;
+                      }
+              
+                      const pr = await response.json();
+              
+                      console.log(`PR state: ${pr.state}, merged: ${pr.merged}`);
+              
+                      if (pr.merged === true) {
+                        await github.rest.issues.update({
+                          owner: ISSUE_OWNER,
+                          repo: ISSUE_REPO,
+                          issue_number: issue.number,
+                          state: "closed",
+                        });
+              
+                        console.log(`✅ Closed issue #${issue.number}`);
+                        break;
+                      }
+              
+                    } catch (error) {
+                      console.log(`Error checking PR ${prOwner}/${prRepo}#${prNumber}`);
+                      console.log(error.message);
+                    }
                   }
-
-                  const pr = await response.json();
-
-                  console.log(`PR state: ${pr.state}, merged: ${pr.merged}`);
-
-                  if (pr.merged === true) {
-
-                    await github.rest.issues.update({
-                      owner: ISSUE_OWNER,
-                      repo: ISSUE_REPO,
-                      issue_number: issue.number,
-                      state: "closed",
-                    });
-
-                    console.log(`✅ Closed issue #${issue.number} because PR was merged`);
-                    break;
-                  }
-
-                } catch (error) {
-                  console.log(`Error checking PR ${prOwner}/${prRepo}#${prNumber}`);
-                  console.log(error.message);
                 }
               }
-            }
