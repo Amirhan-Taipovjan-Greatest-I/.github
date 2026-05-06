@@ -24,14 +24,12 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
 
-            const { Octokit } = require("@octokit/core");
-
             const ISSUE_OWNER = context.repo.owner;
             const ISSUE_REPO = context.repo.repo;
             const PROJECT_NUMBER = 3;
 
-            // ✅ Secondary Octokit using PAT
-            const userOctokit = new Octokit({
+            // ✅ Create SECOND authenticated client using PAT
+            const userOctokit = new github.constructor({
               auth: process.env.USER_PROJECT_TOKEN
             });
 
@@ -88,7 +86,7 @@ jobs:
 
             if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) return;
 
-            // ✅ Fetch ALL project items (pagination)
+            // ✅ Pagination for unlimited project size
             async function getAllProjectItems(projectId) {
               let hasNextPage = true;
               let endCursor = null;
@@ -118,6 +116,7 @@ jobs:
 
                 const items = data.node.items;
                 allItems.push(...items.nodes);
+
                 hasNextPage = items.pageInfo.hasNextPage;
                 endCursor = items.pageInfo.endCursor;
               }
@@ -170,6 +169,7 @@ jobs:
                     continue;
                   }
 
+                  // ✅ Close if merged
                   if (prData.merged) {
                     await github.rest.issues.update({
                       owner: ISSUE_OWNER,
@@ -192,7 +192,7 @@ jobs:
 
                   if (!projectItem) continue;
 
-                  // ✅ TRUE PAT mutation (this is the fix)
+                  // ✅ PAT‑authenticated mutation
                   await userOctokit.graphql(`
                     mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $optionId:String!) {
                       updateProjectV2ItemFieldValue(
