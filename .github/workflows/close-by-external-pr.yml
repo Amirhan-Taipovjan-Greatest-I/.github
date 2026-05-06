@@ -206,6 +206,7 @@ jobs:
                         nodes {
                           ... on ProjectV2ItemFieldSingleSelectValue {
                             field { ... on ProjectV2SingleSelectField { id } }
+                            name
                             optionId
                           }
                         }
@@ -219,19 +220,29 @@ jobs:
                 .find(v => v.field?.id === STATUS_FIELD_ID);
 
               const currentStatusOptionId = currentStatusValue?.optionId;
+              const currentStatusName = currentStatusValue?.name?.toLowerCase();
 
-              let targetOptionId;
+              let targetOptionId = null;
 
               // ✅ FINAL STATE MACHINE
+
               if (anyDraft) {
-                targetOptionId = IN_PROGRESS_OPTION_ID;
+
+                // Only downgrade from In Review → In Progress
+                if (currentStatusName === "in review") {
+                  targetOptionId = IN_PROGRESS_OPTION_ID;
+                }
+
               } else {
-                targetOptionId = IN_REVIEW_OPTION_ID;
+
+                // No drafts → promote to In Review
+                if (currentStatusName !== "in review") {
+                  targetOptionId = IN_REVIEW_OPTION_ID;
+                }
               }
 
-              if (currentStatusOptionId === targetOptionId) {
-                continue;
-              }
+              if (!targetOptionId) continue;
+              if (currentStatusOptionId === targetOptionId) continue;
 
               // ✅ Update via PAT
               await userOctokit.graphql(`
