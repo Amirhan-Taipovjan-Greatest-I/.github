@@ -1,4 +1,4 @@
-name: Close issues when external PRs merge
+name: Sync Issues with Linked PRs and Project
 
 on:
   schedule:
@@ -8,27 +8,89 @@ on:
 permissions:
   contents: read
   issues: write
+  repository-projects: write
 
 jobs:
-  check-prs:
+  sync:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Close issues linked to merged external PRs
+      - name: Sync Issues, PR State, and Project Status
         uses: actions/github-script@v7
         with:
           script: |
+
             const ISSUE_OWNER = context.repo.owner;
             const ISSUE_REPO = context.repo.repo;
+            const PROJECT_NUMBER = 3;
 
-            console.log(`Checking repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
+            console.log(`Repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
 
+            // ✅ Get project by number
+            const projectData = await github.graphql(`
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  projectV2(number: $number) {
+                    id
+                    fields(first: 20) {
+                      nodes {
+                        ... on ProjectV2SingleSelectField {
+                          id
+                          name
+                          options {
+                            id
+                            name
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `, {
+              owner: ISSUE_OWNER,
+              repo: ISSUE_REPO,
+              number: PROJECT_NUMBER
+            });
+
+            const project = projectData.repository.projectV2;
+
+            if (!project) {
+              console.log("Project not found.");
+              return;
+            }
+
+            const PROJECT_ID = project.id;
+
+            const statusField = project.fields.nodes.find(f => f.name === "Status");
+
+            if (!statusField) {
+              console.log("Status field not found.");
+              return;
+            }
+
+            const STATUS_FIELD_ID = statusField.id;
+
+            const IN_PROGRESS_OPTION_ID =
+              statusField.options.find(o => o.name === "In progress")?.id;
+
+            const IN_REVIEW_OPTION_ID =
+              statusField.options.find(o => o.name === "In Review")?.id;
+
+            if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) {
+              console.log("Required status options not found.");
+              return;
+            }
+
+            console.log("Project and Status field resolved successfully.");
+
+            // ✅ Get open issues
             const issues = await github.paginate(
               github.rest.issues.listForRepo,
               {
                 owner: ISSUE_OWNER,
                 repo: ISSUE_REPO,
-                state: 'open',
+                state: "open",
               }
             );
 
@@ -38,16 +100,14 @@ jobs:
 
               console.log(`\nChecking issue #${issue.number}`);
 
-              // ✅ Get timeline events
+              // ✅ Get timeline (linked PRs)
               const timeline = await github.paginate(
                 github.rest.issues.listEventsForTimeline,
                 {
                   owner: ISSUE_OWNER,
                   repo: ISSUE_REPO,
                   issue_number: issue.number,
-                  mediaType: {
-                    previews: ["mockingbird"]  // required for timeline API
-                  }
+                  mediaType: { previews: ["mockingbird"] }
                 }
               );
 
@@ -60,42 +120,92 @@ jobs:
                   const prRepo = pr.repository.name;
                   const prNumber = pr.number;
 
-                  console.log(`Found linked PR: ${prOwner}/${prRepo}#${prNumber}`);
+                  console.log(`Linked PR: ${prOwner}/${prRepo}#${prNumber}`);
 
-                  try {
-                    const response = await fetch(
-                      `https://api.github.com/repos/${prOwner}/${prRepo}/pulls/${prNumber}`,
-                      {
-                        headers: { 'Accept': 'application/vnd.github+json' }
-                      }
-                    );
+                  const response = await fetch(
+                    `https://api.github.com/repos/${prOwner}/${prRepo}/pulls/${prNumber}`,
+                    { headers: { 'Accept': 'application/vnd.github+json' } }
+                  );
 
-                    if (!response.ok) {
-                      console.log(`Cannot access PR ${prOwner}/${prRepo}#${prNumber}`);
-                      continue;
-                    }
-
-                    const prData = await response.json();
-
-                    console.log(`PR state: ${prData.state}, merged: ${prData.merged}`);
-
-                    if (prData.merged === true) {
-
-                      await github.rest.issues.update({
-                        owner: ISSUE_OWNER,
-                        repo: ISSUE_REPO,
-                        issue_number: issue.number,
-                        state: "closed",
-                      });
-
-                      console.log(`✅ Closed issue #${issue.number}`);
-                      break;
-                    }
-
-                  } catch (error) {
-                    console.log(`Error checking PR ${prOwner}/${prRepo}#${prNumber}`);
-                    console.log(error.message);
+                  if (!response.ok) {
+                    console.log("Cannot access PR.");
+                    continue;
                   }
+
+                  const prData = await response.json();
+
+                  console.log(`PR state: ${prData.state}, draft: ${prData.draft}, merged: ${prData.merged}`);
+
+                  // ✅ Close issue if merged
+                  if (prData.merged === true) {
+
+                    await github.rest.issues.update({
+                      owner: ISSUE_OWNER,
+                      repo: ISSUE_REPO,
+                      issue_number: issue.number,
+                      state: "closed",
+                    });
+
+                    console.log(`✅ Closed issue #${issue.number}`);
+                    break;
+                  }
+
+                  // ✅ Determine correct project status
+                  const targetOptionId =
+                    prData.draft === true
+                      ? IN_PROGRESS_OPTION_ID
+                      : IN_REVIEW_OPTION_ID;
+
+                  // ✅ Get project item ID for this issue
+                  const itemData = await github.graphql(`
+                    query($owner:String!, $repo:String!, $number:Int!) {
+                      repository(owner:$owner, name:$repo) {
+                        issue(number:$number) {
+                          projectItems(first:20) {
+                            nodes {
+                              id
+                              project { id }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  `, {
+                    owner: ISSUE_OWNER,
+                    repo: ISSUE_REPO,
+                    number: issue.number
+                  });
+
+                  const projectItem = itemData.repository.issue.projectItems.nodes
+                    .find(i => i.project.id === PROJECT_ID);
+
+                  if (!projectItem) {
+                    console.log("Issue not in project.");
+                    continue;
+                  }
+
+                  // ✅ Update Status field
+                  await github.graphql(`
+                    mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $optionId:String!) {
+                      updateProjectV2ItemFieldValue(
+                        input:{
+                          projectId:$projectId
+                          itemId:$itemId
+                          fieldId:$fieldId
+                          value:{ singleSelectOptionId:$optionId }
+                        }
+                      ) {
+                        projectV2Item { id }
+                      }
+                    }
+                  `, {
+                    projectId: PROJECT_ID,
+                    itemId: projectItem.id,
+                    fieldId: STATUS_FIELD_ID,
+                    optionId: targetOptionId
+                  });
+
+                  console.log(`✅ Updated project status for issue #${issue.number}`);
                 }
               }
             }
