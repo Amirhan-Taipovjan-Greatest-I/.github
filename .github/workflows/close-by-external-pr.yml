@@ -28,9 +28,12 @@ jobs:
             const ISSUE_REPO = context.repo.repo;
             const PROJECT_NUMBER = 3;
 
+            // ✅ Secondary authenticated client (PAT)
             const userOctokit = new github.constructor({
               auth: process.env.USER_PROJECT_TOKEN
             });
+
+            console.log(`Repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
 
             // ✅ Resolve USER Project
             const projectData = await github.graphql(`
@@ -43,10 +46,7 @@ jobs:
                         ... on ProjectV2SingleSelectField {
                           id
                           name
-                          options {
-                            id
-                            name
-                          }
+                          options { id name }
                         }
                       }
                     }
@@ -71,16 +71,6 @@ jobs:
 
             const STATUS_FIELD_ID = statusField.id;
 
-            const BACKLOG_OPTION_ID =
-              statusField.options?.find(o =>
-                o.name?.toLowerCase() === "backlog"
-              )?.id;
-
-            const READY_OPTION_ID =
-              statusField.options?.find(o =>
-                o.name?.toLowerCase() === "ready"
-              )?.id;
-
             const IN_PROGRESS_OPTION_ID =
               statusField.options?.find(o =>
                 o.name?.toLowerCase().includes("progress")
@@ -93,7 +83,7 @@ jobs:
 
             if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) return;
 
-            // ✅ Fetch ALL project items (pagination)
+            // ✅ Pagination for unlimited project size
             async function getAllProjectItems(projectId) {
               let hasNextPage = true;
               let endCursor = null;
@@ -105,15 +95,10 @@ jobs:
                     node(id: $projectId) {
                       ... on ProjectV2 {
                         items(first: 100, after: $cursor) {
-                          pageInfo {
-                            hasNextPage
-                            endCursor
-                          }
+                          pageInfo { hasNextPage endCursor }
                           nodes {
                             id
-                            content {
-                              ... on Issue { id }
-                            }
+                            content { ... on Issue { id } }
                           }
                         }
                       }
@@ -144,6 +129,8 @@ jobs:
 
             for (const issue of issues) {
 
+              console.log(`Checking issue #${issue.number}`);
+
               const timeline = await github.paginate(
                 github.rest.issues.listEventsForTimeline,
                 {
@@ -154,16 +141,15 @@ jobs:
                 }
               );
 
-              // ✅ Collect linked PRs
+              // ✅ Collect ALL linked PRs
               const linkedPRs = timeline
                 .filter(e => e.event === "cross-referenced" && e.source?.issue?.pull_request)
                 .map(e => e.source.issue);
 
               if (linkedPRs.length === 0) continue;
 
-              let anyMerged = false;
-              let anyReady = false;
-              let allDraft = true;
+              let allMerged = true;
+              let anyDraft = false;
 
               for (const pr of linkedPRs) {
 
@@ -183,18 +169,17 @@ jobs:
                   continue;
                 }
 
-                if (prData.merged) {
-                  anyMerged = true;
-                  break;
+                if (!prData.merged) {
+                  allMerged = false;
                 }
 
-                if (!prData.draft) {
-                  anyReady = true;
-                  allDraft = false;
+                if (prData.draft) {
+                  anyDraft = true;
                 }
               }
 
-              if (anyMerged) {
+              // ✅ Close only if ALL PRs merged
+              if (allMerged) {
                 await github.rest.issues.update({
                   owner: ISSUE_OWNER,
                   repo: ISSUE_REPO,
@@ -221,7 +206,6 @@ jobs:
                         nodes {
                           ... on ProjectV2ItemFieldSingleSelectValue {
                             field { ... on ProjectV2SingleSelectField { id } }
-                            name
                             optionId
                           }
                         }
@@ -235,32 +219,21 @@ jobs:
                 .find(v => v.field?.id === STATUS_FIELD_ID);
 
               const currentStatusOptionId = currentStatusValue?.optionId;
-              const currentStatusName = currentStatusValue?.name?.toLowerCase();
 
-              let targetOptionId = null;
+              let targetOptionId;
 
-              // ✅ STATE MACHINE
-
-              if (allDraft) {
-                // Draft PR case
-                if (currentStatusName === "in review") {
-                  targetOptionId = IN_PROGRESS_OPTION_ID;
-                }
-                // Backlog / Ready → do nothing
-              } else if (anyReady) {
-                // Ready PR case
-                if (
-                  currentStatusOptionId === BACKLOG_OPTION_ID ||
-                  currentStatusOptionId === READY_OPTION_ID ||
-                  currentStatusOptionId === IN_PROGRESS_OPTION_ID
-                ) {
-                  targetOptionId = IN_REVIEW_OPTION_ID;
-                }
+              // ✅ FINAL STATE MACHINE
+              if (anyDraft) {
+                targetOptionId = IN_PROGRESS_OPTION_ID;
+              } else {
+                targetOptionId = IN_REVIEW_OPTION_ID;
               }
 
-              if (!targetOptionId) continue;
-              if (currentStatusOptionId === targetOptionId) continue;
+              if (currentStatusOptionId === targetOptionId) {
+                continue;
+              }
 
+              // ✅ Update via PAT
               await userOctokit.graphql(`
                 mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $optionId:String!) {
                   updateProjectV2ItemFieldValue(
