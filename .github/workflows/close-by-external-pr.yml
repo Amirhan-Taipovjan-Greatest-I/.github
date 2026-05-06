@@ -1,4 +1,4 @@
-name: Sync Issues with Linked PRs and Project
+name: Sync Issues with Linked PRs and User Project
 
 on:
   schedule:
@@ -27,10 +27,10 @@ jobs:
 
             console.log(`Repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
 
-            // ✅ Resolve Project by number
+            // ✅ Resolve USER Project
             const projectData = await github.graphql(`
-              query($owner: String!, $repo: String!, $number: Int!) {
-                repository(owner: $owner, name: $repo) {
+              query($login: String!, $number: Int!) {
+                user(login: $login) {
                   projectV2(number: $number) {
                     id
                     fields(first: 20) {
@@ -49,15 +49,14 @@ jobs:
                 }
               }
             `, {
-              owner: ISSUE_OWNER,
-              repo: ISSUE_REPO,
+              login: ISSUE_OWNER,
               number: PROJECT_NUMBER
             });
 
-            const project = projectData.repository.projectV2;
+            const project = projectData.user.projectV2;
 
             if (!project) {
-              console.log("Project not found.");
+              console.log("User project not found.");
               return;
             }
 
@@ -83,7 +82,7 @@ jobs:
               return;
             }
 
-            console.log("✅ Project and Status field resolved.");
+            console.log("✅ User Project resolved successfully.");
 
             // ✅ Get open issues
             const issues = await github.paginate(
@@ -101,7 +100,6 @@ jobs:
 
               console.log(`\nChecking issue #${issue.number}`);
 
-              // ✅ Get timeline (linked PRs)
               const timeline = await github.paginate(
                 github.rest.issues.listEventsForTimeline,
                 {
@@ -123,7 +121,6 @@ jobs:
 
                   console.log(`Linked PR: ${prOwner}/${prRepo}#${prNumber}`);
 
-                  // ✅ AUTHENTICATED PR REQUEST (Fixes draft detection)
                   let prData;
 
                   try {
@@ -139,14 +136,14 @@ jobs:
                     prData = result.data;
 
                   } catch (error) {
-                    console.log("Cannot access PR with authenticated request.");
+                    console.log("Cannot access PR.");
                     continue;
                   }
 
                   console.log(`PR state: ${prData.state}, draft: ${prData.draft}, merged: ${prData.merged}`);
 
                   // ✅ Close issue if merged
-                  if (prData.merged === true) {
+                  if (prData.merged) {
 
                     await github.rest.issues.update({
                       owner: ISSUE_OWNER,
@@ -159,13 +156,13 @@ jobs:
                     break;
                   }
 
-                  // ✅ Determine target status
+                  // ✅ Determine correct status
                   const targetOptionId =
                     prData.draft
                       ? IN_PROGRESS_OPTION_ID
                       : IN_REVIEW_OPTION_ID;
 
-                  // ✅ Get Project Item ID
+                  // ✅ Get Project Item
                   const itemData = await github.graphql(`
                     query($owner:String!, $repo:String!, $number:Int!) {
                       repository(owner:$owner, name:$repo) {
@@ -189,11 +186,10 @@ jobs:
                     .find(i => i.project.id === PROJECT_ID);
 
                   if (!projectItem) {
-                    console.log("Issue not in project.");
+                    console.log("Issue not in user project.");
                     continue;
                   }
 
-                  // ✅ Update Status field
                   await github.graphql(`
                     mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $optionId:String!) {
                       updateProjectV2ItemFieldValue(
