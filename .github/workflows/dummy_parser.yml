@@ -1,0 +1,43 @@
+name: Sync Issues with Linked PRs
+
+on:
+  schedule:
+    - cron: '0 */1 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Dump Project Info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const result = await github.graphql(`
+              query {
+                viewer {
+                  projectsV2(first: 10) {
+                    nodes {
+                      id
+                      title
+                      fields(first:20) {
+                        nodes {
+                          ... on ProjectV2SingleSelectField {
+                            id
+                            name
+                            options {
+                              id
+                              name
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `);
+      
+            console.log(JSON.stringify(result, null, 2));
