@@ -62,10 +62,10 @@ jobs:
 
             const PROJECT_ID = project.id;
 
-            // ✅ Robust Status field detection
-            const statusField = project.fields.nodes.find(
-              f => f.name.trim().toLowerCase() === "status"
-            );
+            // ✅ SAFE Status field detection
+            const statusField = project.fields.nodes
+              .filter(f => f && f.name)
+              .find(f => f.name.trim().toLowerCase() === "status");
 
             if (!statusField) {
               console.log("Status field not found.");
@@ -75,18 +75,18 @@ jobs:
             const STATUS_FIELD_ID = statusField.id;
 
             const IN_PROGRESS_OPTION_ID =
-              statusField.options.find(o =>
-                o.name.toLowerCase().includes("progress")
+              statusField.options?.find(o =>
+                o.name?.toLowerCase().includes("progress")
               )?.id;
 
             const IN_REVIEW_OPTION_ID =
-              statusField.options.find(o =>
-                o.name.toLowerCase().includes("review")
+              statusField.options?.find(o =>
+                o.name?.toLowerCase().includes("review")
               )?.id;
 
             if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) {
               console.log("Available Status options:");
-              statusField.options.forEach(o => console.log(`- ${o.name}`));
+              statusField.options?.forEach(o => console.log(`- ${o.name}`));
               return;
             }
 
@@ -148,7 +148,6 @@ jobs:
 
                   console.log(`PR state: ${prData.state}, draft: ${prData.draft}, merged: ${prData.merged}`);
 
-                  // ✅ Close issue if merged
                   if (prData.merged) {
                     await github.rest.issues.update({
                       owner: ISSUE_OWNER,
@@ -165,7 +164,7 @@ jobs:
                       ? IN_PROGRESS_OPTION_ID
                       : IN_REVIEW_OPTION_ID;
 
-                  // ✅ Find Project Item by querying project items
+                  // ✅ Query project items
                   const projectItemsData = await github.graphql(`
                     query($projectId: ID!) {
                       node(id: $projectId) {
@@ -176,7 +175,6 @@ jobs:
                               content {
                                 ... on Issue {
                                   id
-                                  number
                                 }
                               }
                             }
