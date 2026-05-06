@@ -33,7 +33,7 @@ jobs:
                 user(login: $login) {
                   projectV2(number: $number) {
                     id
-                    fields(first: 20) {
+                    fields(first: 50) {
                       nodes {
                         ... on ProjectV2SingleSelectField {
                           id
@@ -62,7 +62,10 @@ jobs:
 
             const PROJECT_ID = project.id;
 
-            const statusField = project.fields.nodes.find(f => f.name === "Status");
+            // ✅ Robust Status field detection
+            const statusField = project.fields.nodes.find(
+              f => f.name.trim().toLowerCase() === "status"
+            );
 
             if (!statusField) {
               console.log("Status field not found.");
@@ -72,13 +75,18 @@ jobs:
             const STATUS_FIELD_ID = statusField.id;
 
             const IN_PROGRESS_OPTION_ID =
-              statusField.options.find(o => o.name === "In Progress")?.id;
+              statusField.options.find(o =>
+                o.name.toLowerCase().includes("progress")
+              )?.id;
 
             const IN_REVIEW_OPTION_ID =
-              statusField.options.find(o => o.name === "In Review")?.id;
+              statusField.options.find(o =>
+                o.name.toLowerCase().includes("review")
+              )?.id;
 
             if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) {
-              console.log("Required status options not found.");
+              console.log("Available Status options:");
+              statusField.options.forEach(o => console.log(`- ${o.name}`));
               return;
             }
 
@@ -132,10 +140,8 @@ jobs:
                         pull_number: prNumber,
                       }
                     );
-
                     prData = result.data;
-
-                  } catch (error) {
+                  } catch {
                     console.log("Cannot access PR.");
                     continue;
                   }
@@ -144,46 +150,48 @@ jobs:
 
                   // ✅ Close issue if merged
                   if (prData.merged) {
-
                     await github.rest.issues.update({
                       owner: ISSUE_OWNER,
                       repo: ISSUE_REPO,
                       issue_number: issue.number,
                       state: "closed",
                     });
-
                     console.log(`✅ Closed issue #${issue.number}`);
                     break;
                   }
 
-                  // ✅ Determine correct status
                   const targetOptionId =
                     prData.draft
                       ? IN_PROGRESS_OPTION_ID
                       : IN_REVIEW_OPTION_ID;
 
-                  // ✅ Get Project Item
-                  const itemData = await github.graphql(`
-                    query($owner:String!, $repo:String!, $number:Int!) {
-                      repository(owner:$owner, name:$repo) {
-                        issue(number:$number) {
-                          projectItems(first:20) {
+                  // ✅ Find Project Item by querying project items
+                  const projectItemsData = await github.graphql(`
+                    query($projectId: ID!) {
+                      node(id: $projectId) {
+                        ... on ProjectV2 {
+                          items(first: 100) {
                             nodes {
                               id
-                              project { id }
+                              content {
+                                ... on Issue {
+                                  id
+                                  number
+                                }
+                              }
                             }
                           }
                         }
                       }
                     }
-                  `, {
-                    owner: ISSUE_OWNER,
-                    repo: ISSUE_REPO,
-                    number: issue.number
-                  });
+                  `, { projectId: PROJECT_ID });
 
-                  const projectItem = itemData.repository.issue.projectItems.nodes
-                    .find(i => i.project.id === PROJECT_ID);
+                  const issueNodeId = issue.node_id;
+
+                  const projectItem =
+                    projectItemsData.node.items.nodes.find(
+                      item => item.content?.id === issueNodeId
+                    );
 
                   if (!projectItem) {
                     console.log("Issue not in user project.");
