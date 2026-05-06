@@ -60,3 +60,30 @@ jobs:
                   );
 
                   if (!response.ok) {
+                    console.log(`Cannot access PR ${prOwner}/${prRepo}#${prNumber} (status ${response.status})`);
+                    continue;
+                  }
+
+                  const pr = await response.json();
+
+                  console.log(`PR state: ${pr.state}, merged: ${pr.merged}`);
+
+                  if (pr.merged === true) {
+
+                    await github.rest.issues.update({
+                      owner: ISSUE_OWNER,
+                      repo: ISSUE_REPO,
+                      issue_number: issue.number,
+                      state: "closed",
+                    });
+
+                    console.log(`✅ Closed issue #${issue.number} because PR was merged`);
+                    break;
+                  }
+
+                } catch (error) {
+                  console.log(`Error checking PR ${prOwner}/${prRepo}#${prNumber}`);
+                  console.log(error.message);
+                }
+              }
+            }
