@@ -9,6 +9,7 @@ permissions:
   contents: read
   issues: write
   repository-projects: write
+  pull-requests: read
 
 jobs:
   sync:
@@ -26,7 +27,7 @@ jobs:
 
             console.log(`Repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
 
-            // ✅ Get project by number
+            // ✅ Resolve Project by number
             const projectData = await github.graphql(`
               query($owner: String!, $repo: String!, $number: Int!) {
                 repository(owner: $owner, name: $repo) {
@@ -82,7 +83,7 @@ jobs:
               return;
             }
 
-            console.log("Project and Status field resolved successfully.");
+            console.log("✅ Project and Status field resolved.");
 
             // ✅ Get open issues
             const issues = await github.paginate(
@@ -122,17 +123,25 @@ jobs:
 
                   console.log(`Linked PR: ${prOwner}/${prRepo}#${prNumber}`);
 
-                  const response = await fetch(
-                    `https://api.github.com/repos/${prOwner}/${prRepo}/pulls/${prNumber}`,
-                    { headers: { 'Accept': 'application/vnd.github+json' } }
-                  );
+                  // ✅ AUTHENTICATED PR REQUEST (Fixes draft detection)
+                  let prData;
 
-                  if (!response.ok) {
-                    console.log("Cannot access PR.");
+                  try {
+                    const result = await github.request(
+                      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+                      {
+                        owner: prOwner,
+                        repo: prRepo,
+                        pull_number: prNumber,
+                      }
+                    );
+
+                    prData = result.data;
+
+                  } catch (error) {
+                    console.log("Cannot access PR with authenticated request.");
                     continue;
                   }
-
-                  const prData = await response.json();
 
                   console.log(`PR state: ${prData.state}, draft: ${prData.draft}, merged: ${prData.merged}`);
 
@@ -150,13 +159,13 @@ jobs:
                     break;
                   }
 
-                  // ✅ Determine correct project status
+                  // ✅ Determine target status
                   const targetOptionId =
-                    prData.draft === true
+                    prData.draft
                       ? IN_PROGRESS_OPTION_ID
                       : IN_REVIEW_OPTION_ID;
 
-                  // ✅ Get project item ID for this issue
+                  // ✅ Get Project Item ID
                   const itemData = await github.graphql(`
                     query($owner:String!, $repo:String!, $number:Int!) {
                       repository(owner:$owner, name:$repo) {
