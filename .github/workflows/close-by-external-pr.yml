@@ -8,6 +8,250 @@ on:
 permissions:
   contents: read
   issues: write
+  repository-projects: read
+  pull-requests: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Sync Issues, PR State, and Project Status
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+
+            const ISSUE_OWNER = context.repo.owner;
+            const ISSUE_REPO = context.repo.repo;
+            const PROJECT_NUMBER = 3;
+
+            console.log(`Repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
+
+            // ✅ Resolve USER Project
+            const projectData = await github.graphql(`
+              query($login: String!, $number: Int!) {
+                user(login: $login) {
+                  projectV2(number: $number) {
+                    id
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2SingleSelectField {
+                          id
+                          name
+                          options {
+                            id
+                            name
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `, {
+              login: ISSUE_OWNER,
+              number: PROJECT_NUMBER
+            });
+
+            const project = projectData.user.projectV2;
+            if (!project) {
+              console.log("User project not found.");
+              return;
+            }
+
+            const PROJECT_ID = project.id;
+
+            const statusField = project.fields.nodes
+              .filter(f => f && f.name)
+              .find(f => f.name.trim().toLowerCase() === "status");
+
+            if (!statusField) {
+              console.log("Status field not found.");
+              return;
+            }
+
+            const STATUS_FIELD_ID = statusField.id;
+
+            const IN_PROGRESS_OPTION_ID =
+              statusField.options?.find(o =>
+                o.name?.toLowerCase().includes("progress")
+              )?.id;
+
+            const IN_REVIEW_OPTION_ID =
+              statusField.options?.find(o =>
+                o.name?.toLowerCase().includes("review")
+              )?.id;
+
+            if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) {
+              console.log("Available Status options:");
+              statusField.options?.forEach(o => console.log(`- ${o.name}`));
+              return;
+            }
+
+            console.log("✅ Project resolved.");
+
+            // ✅ Fetch ALL project items with pagination
+            async function getAllProjectItems(projectId) {
+              let hasNextPage = true;
+              let endCursor = null;
+              let allItems = [];
+
+              while (hasNextPage) {
+                const data = await github.graphql(`
+                  query($projectId: ID!, $cursor: String) {
+                    node(id: $projectId) {
+                      ... on ProjectV2 {
+                        items(first: 100, after: $cursor) {
+                          pageInfo {
+                            hasNextPage
+                            endCursor
+                          }
+                          nodes {
+                            id
+                            content {
+                              ... on Issue {
+                                id
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                `, { projectId, cursor: endCursor });
+
+                const items = data.node.items;
+                allItems.push(...items.nodes);
+
+                hasNextPage = items.pageInfo.hasNextPage;
+                endCursor = items.pageInfo.endCursor;
+              }
+
+              return allItems;
+            }
+
+            const projectItems = await getAllProjectItems(PROJECT_ID);
+            console.log(`Loaded ${projectItems.length} project items.`);
+
+            // ✅ Get open issues
+            const issues = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner: ISSUE_OWNER,
+                repo: ISSUE_REPO,
+                state: "open",
+              }
+            );
+
+            for (const issue of issues) {
+
+              console.log(`Checking issue #${issue.number}`);
+
+              const timeline = await github.paginate(
+                github.rest.issues.listEventsForTimeline,
+                {
+                  owner: ISSUE_OWNER,
+                  repo: ISSUE_REPO,
+                  issue_number: issue.number,
+                  mediaType: { previews: ["mockingbird"] }
+                }
+              );
+
+              for (const event of timeline) {
+
+                if (event.event === "cross-referenced" && event.source?.issue?.pull_request) {
+
+                  const pr = event.source.issue;
+                  const prOwner = pr.repository.owner.login;
+                  const prRepo = pr.repository.name;
+                  const prNumber = pr.number;
+
+                  let prData;
+
+                  try {
+                    const result = await github.request(
+                      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+                      {
+                        owner: prOwner,
+                        repo: prRepo,
+                        pull_number: prNumber,
+                      }
+                    );
+                    prData = result.data;
+                  } catch {
+                    continue;
+                  }
+
+                  if (prData.merged) {
+                    await github.rest.issues.update({
+                      owner: ISSUE_OWNER,
+                      repo: ISSUE_REPO,
+                      issue_number: issue.number,
+                      state: "closed",
+                    });
+                    console.log(`✅ Closed issue #${issue.number}`);
+                    break;
+                  }
+
+                  const targetOptionId =
+                    prData.draft
+                      ? IN_PROGRESS_OPTION_ID
+                      : IN_REVIEW_OPTION_ID;
+
+                  const projectItem =
+                    projectItems.find(
+                      item => item.content?.id === issue.node_id
+                    );
+
+                  if (!projectItem) {
+                    console.log("Issue not in user project.");
+                    continue;
+                  }
+
+                  // ✅ Use PAT only for mutation
+                  const projectGithub = github;
+                  projectGithub.request.defaults({
+                    headers: {
+                      authorization: `Bearer ${process.env.USER_PROJECT_TOKEN}`
+                    }
+                  });
+
+                  await projectGithub.graphql(`
+                    mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $optionId:String!) {
+                      updateProjectV2ItemFieldValue(
+                        input:{
+                          projectId:$projectId
+                          itemId:$itemId
+                          fieldId:$fieldId
+                          value:{ singleSelectOptionId:$optionId }
+                        }
+                      ) {
+                        projectV2Item { id }
+                      }
+                    }
+                  `, {
+                    projectId: PROJECT_ID,
+                    itemId: projectItem.id,
+                    fieldId: STATUS_FIELD_ID,
+                    optionId: targetOptionId
+                  });
+
+                  console.log(`✅ Updated status for issue #${issue.number}`);
+                }
+              }
+            }
+        env:
+          USER_PROJECT_TOKEN: ${{ secrets.USER_PROJECT_TOKEN }}name: Sync Issues with Linked PRs and User Project
+
+on:
+  schedule:
+    - cron: '0 */1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
   repository-projects: write
   pull-requests: read
 
