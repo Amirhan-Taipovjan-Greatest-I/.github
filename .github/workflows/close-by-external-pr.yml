@@ -18,13 +18,22 @@ jobs:
     steps:
       - name: Sync Issues, PR State, and Project Status
         uses: actions/github-script@v7
+        env:
+          USER_PROJECT_TOKEN: ${{ secrets.USER_PROJECT_TOKEN }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
 
+            const { Octokit } = require("@octokit/core");
+
             const ISSUE_OWNER = context.repo.owner;
             const ISSUE_REPO = context.repo.repo;
             const PROJECT_NUMBER = 3;
+
+            // ✅ Secondary Octokit using PAT
+            const userOctokit = new Octokit({
+              auth: process.env.USER_PROJECT_TOKEN
+            });
 
             console.log(`Repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
 
@@ -55,10 +64,7 @@ jobs:
             });
 
             const project = projectData.user.projectV2;
-            if (!project) {
-              console.log("User project not found.");
-              return;
-            }
+            if (!project) return;
 
             const PROJECT_ID = project.id;
 
@@ -66,10 +72,7 @@ jobs:
               .filter(f => f && f.name)
               .find(f => f.name.trim().toLowerCase() === "status");
 
-            if (!statusField) {
-              console.log("Status field not found.");
-              return;
-            }
+            if (!statusField) return;
 
             const STATUS_FIELD_ID = statusField.id;
 
@@ -83,15 +86,9 @@ jobs:
                 o.name?.toLowerCase().includes("review")
               )?.id;
 
-            if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) {
-              console.log("Available Status options:");
-              statusField.options?.forEach(o => console.log(`- ${o.name}`));
-              return;
-            }
+            if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) return;
 
-            console.log("✅ Project resolved.");
-
-            // ✅ Fetch ALL project items with pagination
+            // ✅ Fetch ALL project items (pagination)
             async function getAllProjectItems(projectId) {
               let hasNextPage = true;
               let endCursor = null;
@@ -110,9 +107,7 @@ jobs:
                           nodes {
                             id
                             content {
-                              ... on Issue {
-                                id
-                              }
+                              ... on Issue { id }
                             }
                           }
                         }
@@ -123,7 +118,6 @@ jobs:
 
                 const items = data.node.items;
                 allItems.push(...items.nodes);
-
                 hasNextPage = items.pageInfo.hasNextPage;
                 endCursor = items.pageInfo.endCursor;
               }
@@ -132,9 +126,7 @@ jobs:
             }
 
             const projectItems = await getAllProjectItems(PROJECT_ID);
-            console.log(`Loaded ${projectItems.length} project items.`);
 
-            // ✅ Get open issues
             const issues = await github.paginate(
               github.rest.issues.listForRepo,
               {
@@ -145,8 +137,6 @@ jobs:
             );
 
             for (const issue of issues) {
-
-              console.log(`Checking issue #${issue.number}`);
 
               const timeline = await github.paginate(
                 github.rest.issues.listEventsForTimeline,
@@ -163,9 +153,6 @@ jobs:
                 if (event.event === "cross-referenced" && event.source?.issue?.pull_request) {
 
                   const pr = event.source.issue;
-                  const prOwner = pr.repository.owner.login;
-                  const prRepo = pr.repository.name;
-                  const prNumber = pr.number;
 
                   let prData;
 
@@ -173,9 +160,9 @@ jobs:
                     const result = await github.request(
                       "GET /repos/{owner}/{repo}/pulls/{pull_number}",
                       {
-                        owner: prOwner,
-                        repo: prRepo,
-                        pull_number: prNumber,
+                        owner: pr.repository.owner.login,
+                        repo: pr.repository.name,
+                        pull_number: pr.number,
                       }
                     );
                     prData = result.data;
@@ -190,7 +177,6 @@ jobs:
                       issue_number: issue.number,
                       state: "closed",
                     });
-                    console.log(`✅ Closed issue #${issue.number}`);
                     break;
                   }
 
@@ -204,20 +190,10 @@ jobs:
                       item => item.content?.id === issue.node_id
                     );
 
-                  if (!projectItem) {
-                    console.log("Issue not in user project.");
-                    continue;
-                  }
+                  if (!projectItem) continue;
 
-                  // ✅ Use PAT only for mutation
-                  const projectGithub = github;
-                  projectGithub.request.defaults({
-                    headers: {
-                      authorization: `Bearer ${process.env.USER_PROJECT_TOKEN}`
-                    }
-                  });
-
-                  await projectGithub.graphql(`
+                  // ✅ TRUE PAT mutation (this is the fix)
+                  await userOctokit.graphql(`
                     mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $optionId:String!) {
                       updateProjectV2ItemFieldValue(
                         input:{
@@ -241,5 +217,3 @@ jobs:
                 }
               }
             }
-        env:
-          USER_PROJECT_TOKEN: ${{ secrets.USER_PROJECT_TOKEN }}
