@@ -1,15 +1,16 @@
-name: Sync Issues with Linked PRs and User Project
+# Was written by 'the Dark Side' and was Idea-Leaded by Me.
+name: Syncing Issues with Linked PRs and User Project
 
 on:
-  issues:
+  issues: # The Secondary Event that is needed for a Defined GitHub Action.
     types: [opened, edited, milestoned, demilestoned]
-  issue_comment:
+  issue_comment: # The Secondary Event that is needed for a Defined GitHub Action. Especially I like commenting on Issues, etc.
     types: [created, edited]
-  schedule:
-    - cron: '0 */1 * * *' # Passive fallback to catch silent external changes
+  schedule: # The Main Event, do not touch.
+    - cron: '0 */1 * * *' # Change the "1" to any number of Hours... updates every "x" Hours.
   workflow_dispatch:
 
-permissions:
+permissions: # Permissions for GITHUB_TOKEN that generates every Time a GitHub Action runs.
   contents: read
   issues: write
   repository-projects: read
@@ -20,10 +21,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Sync Issues, PR State, and Project Status
+      - name: Syncing Issue Statuses with linked PR Statuses + Issues'' Project Statuses depending on PR States.
         uses: actions/github-script@v7
         env:
-          USER_PROJECT_TOKEN: ${{ secrets.USER_PROJECT_TOKEN }}
+          USER_PROJECT_TOKEN: ${{ secrets.USER_PROJECT_TOKEN }} # Add the 'USER_PROJECT_TOKEN' Repository Secret in a Repo Settings.
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -34,7 +35,7 @@ jobs:
 
             // ✅ Secondary authenticated client (PAT)
             const userOctokit = new github.constructor({
-              auth: process.env.USER_PROJECT_TOKEN
+              auth: process.env.USER_PROJECT_TOKEN //This Token is a Classic PAT with full Project Permissions only.
             });
 
             console.log(`Repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
