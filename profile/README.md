@@ -34,6 +34,7 @@ Currently a Translator for Tatar Language on such ⏳💯official Projects as:
 - - ⏳Fabric API,
 - - Libraries like ⏳Cloth Config, ⏳lazy-language-loader, ⏳CompleteConfig ⏳MidnightLib, 💯owo-lib, 💯YACL,
 - - ⏳ModMenu,
+- - 💯Config Manager,
 - - ⏳Language Reload,
 - - ⏳CIT Resewn,
 - - ⏳BetterF3,
@@ -47,8 +48,11 @@ Currently a Translator for Tatar Language on such ⏳💯official Projects as:
 - - 💯VoiceMessages,
 - - 💯Vanilla Notebook,
 - - 💯WaveyCapes,
+- - 💯Notes,
+- - ⏳ClientCommands (+💯SimpleWaypoints),
 - - [More research is needed]
 - Minecraft Plugins:
+- - 💯AuthMeReloaded,
 - - 💯GSit,
 - - 💯EastZombies,
 - - ⏳SkinsRestorer.
