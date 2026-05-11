@@ -1,3 +1,4 @@
+# Was written by 'the Dark Side' and was Idea-Leaded by Me.
 name: Syncing Issues with Linked PRs and User Project
 
 on:
@@ -20,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Syncing Issue Statuses with linked PR Statuses
+      - name: Syncing Issue Statuses with linked PR Statuses + Issues' Project Statuses
         uses: actions/github-script@v7
         env:
           USER_PROJECT_TOKEN: ${{ secrets.USER_PROJECT_TOKEN }}
@@ -32,11 +33,15 @@ jobs:
             const ISSUE_REPO = context.repo.repo;
             const PROJECT_NUMBER = 3;
 
+            console.log(`🏁 Initializing Sync Engine for ${ISSUE_OWNER}/${ISSUE_REPO}...`);
+
+            // ✅ Strictly use PAT for ALL Project operations to prevent silent GraphQL redaction
             const userOctokit = new github.constructor({
               auth: process.env.USER_PROJECT_TOKEN
             });
 
-            const projectData = await github.graphql(`
+            console.log(`🔍 Resolving User Project #${PROJECT_NUMBER}...`);
+            const projectData = await userOctokit.graphql(`
               query($login: String!, $number: Int!) {
                 user(login: $login) {
                   projectV2(number: $number) {
@@ -59,73 +64,57 @@ jobs:
             });
 
             const project = projectData.user.projectV2;
-            if (!project) return;
-
+            if (!project) {
+              console.log("❌ CRITICAL ABORT: User Project not found. Check USER_PROJECT_TOKEN permissions.");
+              return;
+            }
             const PROJECT_ID = project.id;
+            console.log(`✅ Project successfully resolved: ${PROJECT_ID}`);
 
             const statusField = project.fields.nodes
-              .find(f => f.name?.toLowerCase() === "status");
+              .find(f => f && f.name?.trim().toLowerCase() === "status");
 
-            if (!statusField) return;
-
+            if (!statusField) {
+              console.log("❌ CRITICAL ABORT: 'Status' field not found in project schema.");
+              return;
+            }
             const STATUS_FIELD_ID = statusField.id;
 
             const IN_PROGRESS_OPTION_ID =
-              statusField.options?.find(o =>
-                o.name?.trim().toLowerCase() === "in progress"
-              )?.id;
+              statusField.options?.find(o => o.name?.toLowerCase().includes("progress"))?.id;
 
             const IN_REVIEW_OPTION_ID =
-              statusField.options?.find(o =>
-                o.name?.trim().toLowerCase() === "in review"
-              )?.id;
+              statusField.options?.find(o => o.name?.toLowerCase().includes("review"))?.id;
 
             if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) {
-              console.log("Status options not matched correctly.");
+              console.log("❌ CRITICAL ABORT: Status options for Progress/Review not matched. Available options:");
+              console.log(statusField.options);
               return;
             }
+            console.log(`✅ Options mapped -> In Progress: ${IN_PROGRESS_OPTION_ID} | In Review: ${IN_REVIEW_OPTION_ID}`);
 
-            const issuesToProcess = await github.paginate(
-              github.rest.issues.listForRepo,
-              {
-                owner: ISSUE_OWNER,
-                repo: ISSUE_REPO,
-                state: "open",
-              }
-            );
-
-            for (const issue of issuesToProcess) {
-
+            // ✅ Fetch all project items & their status values upfront via PAT (Highly optimized + reliable)
+            console.log("📦 Fetching paginated project items via PAT...");
+            async function getAllProjectItems(projectId) {
               let hasNextPage = true;
               let endCursor = null;
-              let linkedPRs = [];
+              let allItems = [];
 
               while (hasNextPage) {
-
-                const timelinePage = await github.graphql(`
-                  query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
-                    repository(owner:$owner, name:$repo) {
-                      issue(number:$number) {
-                        timelineItems(
-                          first:50,
-                          after:$cursor,
-                          itemTypes:[CROSS_REFERENCED_EVENT, CONNECTED_EVENT]
-                        ) {
+                const data = await userOctokit.graphql(`
+                  query($projectId: ID!, $cursor: String) {
+                    node(id: $projectId) {
+                      ... on ProjectV2 {
+                        items(first: 100, after: $cursor) {
                           pageInfo { hasNextPage endCursor }
                           nodes {
-                            ... on CrossReferencedEvent {
-                              source {
-                                ... on PullRequest {
-                                  number
-                                  repository { name owner { login } }
-                                }
-                              }
-                            }
-                            ... on ConnectedEvent {
-                              subject {
-                                ... on PullRequest {
-                                  number
-                                  repository { name owner { login } }
+                            id
+                            content { ... on Issue { id number } }
+                            fieldValues(first: 20) {
+                              nodes {
+                                ... on ProjectV2ItemFieldSingleSelectValue {
+                                  field { ... on ProjectV2SingleSelectField { id } }
+                                  optionId
                                 }
                               }
                             }
@@ -134,127 +123,152 @@ jobs:
                       }
                     }
                   }
-                `, {
-                  owner: ISSUE_OWNER,
-                  repo: ISSUE_REPO,
-                  number: issue.number,
-                  cursor: endCursor
-                });
+                `, { projectId, cursor: endCursor });
 
-                const items = timelinePage.repository.issue.timelineItems;
-
-                const prs = items.nodes
-                  .map(n => n.source || n.subject)
-                  .filter(Boolean);
-
-                linkedPRs.push(...prs);
-
+                const items = data.node.items;
+                allItems.push(...items.nodes);
                 hasNextPage = items.pageInfo.hasNextPage;
                 endCursor = items.pageInfo.endCursor;
               }
+              return allItems;
+            }
 
-              linkedPRs = [
+            const projectItems = await getAllProjectItems(PROJECT_ID);
+            console.log(`✅ Loaded ${projectItems.length} total items from Project.`);
+
+            // ✅ RESTORED DUAL-MODE TARGETING ENGINE
+            let issuesToProcess = [];
+
+            if (context.eventName === 'issues' || context.eventName === 'issue_comment') {
+              const targetIssueNumber = context.payload.issue.number;
+              console.log(`⚡ Instant Sync triggered by action on Issue #${targetIssueNumber}`);
+              try {
+                const { data: freshIssue } = await github.rest.issues.get({
+                  owner: ISSUE_OWNER,
+                  repo: ISSUE_REPO,
+                  issue_number: targetIssueNumber
+                });
+                if (freshIssue.state === 'open') {
+                  issuesToProcess.push(freshIssue);
+                } else {
+                  console.log(`ℹ️ Issue #${targetIssueNumber} is closed. Skipping evaluation.`);
+                }
+              } catch (e) {
+                console.log(`❌ Error fetching issue #${targetIssueNumber}: ${e.message}`);
+              }
+            } else {
+              console.log("⏰ Processing bulk scan for all open issues...");
+              issuesToProcess = await github.paginate(
+                github.rest.issues.listForRepo,
+                { owner: ISSUE_OWNER, repo: ISSUE_REPO, state: "open" }
+              );
+            }
+
+            console.log(`👉 Total issues queued for execution loop: ${issuesToProcess.length}`);
+
+            for (const issue of issuesToProcess) {
+              console.log(`\n----------------------------------------`);
+              console.log(`🔍 Evaluating Issue #${issue.number}`);
+
+              // ✅ Map Issue directly to PAT-fetched project item
+              const projectItem = projectItems.find(item => item.content?.id === issue.node_id);
+              if (!projectItem) {
+                console.log(`ℹ️ Skip reason: Issue #${issue.number} is not attached to Project #${PROJECT_NUMBER}.`);
+                continue;
+              }
+
+              // ✅ Fetch PR linkage timeline
+              const timeline = await github.paginate(
+                github.rest.issues.listEventsForTimeline,
+                {
+                  owner: ISSUE_OWNER,
+                  repo: ISSUE_REPO,
+                  issue_number: issue.number,
+                  mediaType: { previews: ["mockingbird"] }
+                }
+              );
+
+              // ✅ Robust, deduplicated linked PR map
+              const linkedPRs = [
                 ...new Map(
-                  linkedPRs.map(pr => [
-                    `${pr.repository.owner.login}/${pr.repository.name}#${pr.number}`,
-                    pr
-                  ])
+                  timeline
+                    .filter(e => e.source?.issue?.pull_request)
+                    .map(e => {
+                      const pr = e.source.issue;
+                      return [`${pr.repository.owner.login}/${pr.repository.name}#${pr.number}`, pr];
+                    })
                 ).values()
               ];
 
-              if (linkedPRs.length === 0) continue;
+              if (linkedPRs.length === 0) {
+                console.log(`ℹ️ Skip reason: No linked PR references found in timeline.`);
+                continue;
+              }
 
               let allMerged = true;
               let anyDraft = false;
 
+              console.log(`   Found ${linkedPRs.length} linked PR(s). Querying live states via REST...`);
               for (const pr of linkedPRs) {
-
-                const result = await github.request(
-                  "GET /repos/{owner}/{repo}/pulls/{pull_number}",
-                  {
-                    owner: pr.repository.owner.login,
-                    repo: pr.repository.name,
-                    pull_number: pr.number,
-                  }
-                );
-
-                const prData = result.data;
-
-                if (!prData.merged) allMerged = false;
-                if (prData.draft) anyDraft = true;
+                try {
+                  const result = await github.request(
+                    "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+                    {
+                      owner: pr.repository.owner.login,
+                      repo: pr.repository.name,
+                      pull_number: pr.number,
+                    }
+                  );
+                  const prData = result.data;
+                  console.log(`   🔗 PR ${pr.repository.owner.login}/${pr.repository.name}#${pr.number} | merged=${prData.merged} | draft=${prData.draft}`);
+                  
+                  if (!prData.merged) allMerged = false;
+                  if (prData.draft) anyDraft = true;
+                } catch (err) {
+                  console.log(`   ⚠️ Failed to verify PR state (${err.message}). Treating as unmerged.`);
+                  allMerged = false;
+                }
               }
 
               if (allMerged) {
+                console.log(`🟢 Consensus: ALL PRs merged. Closing Issue #${issue.number}...`);
                 await github.rest.issues.update({
                   owner: ISSUE_OWNER,
                   repo: ISSUE_REPO,
                   issue_number: issue.number,
                   state: "closed",
                 });
+                console.log(`✅ Successfully closed Issue #${issue.number}`);
                 continue;
               }
 
-              const itemData = await github.graphql(`
-                query($owner:String!, $repo:String!, $number:Int!) {
-                  repository(owner:$owner, name:$repo) {
-                    issue(number:$number) {
-                      projectItems(first:20) {
-                        nodes {
-                          id
-                          project { id }
-                        }
-                      }
-                    }
-                  }
-                }
-              `, {
-                owner: ISSUE_OWNER,
-                repo: ISSUE_REPO,
-                number: issue.number
-              });
-
-              const projectItem = itemData.repository.issue.projectItems.nodes
-                .find(p => p.project.id === PROJECT_ID);
-
-              if (!projectItem) continue;
-
-              const statusData = await github.graphql(`
-                query($itemId: ID!) {
-                  node(id: $itemId) {
-                    ... on ProjectV2Item {
-                      fieldValues(first: 20) {
-                        nodes {
-                          ... on ProjectV2ItemFieldSingleSelectValue {
-                            field { ... on ProjectV2SingleSelectField { id } }
-                            optionId
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              `, { itemId: projectItem.id });
-
-              const currentStatusValue = statusData.node.fieldValues.nodes
-                .find(v => v.field?.id === STATUS_FIELD_ID);
-
-              const currentStatusOptionId = currentStatusValue?.optionId;
+              // ✅ Read Status safely from pre-fetched item field values
+              const currentStatusNode = projectItem.fieldValues?.nodes?.find(v => v.field?.id === STATUS_FIELD_ID);
+              const currentStatusOptionId = currentStatusNode?.optionId;
 
               let targetOptionId = null;
 
+              // ✅ FINAL CONSENSUS STATE MACHINE (Strict ID comparison)
               if (anyDraft) {
                 if (currentStatusOptionId === IN_REVIEW_OPTION_ID) {
                   targetOptionId = IN_PROGRESS_OPTION_ID;
+                  console.log(`   🟡 Draft constraint active. Flagging downgrade from 'In Review' to 'In Progress'.`);
+                } else {
+                  console.log(`   ℹ️ Draft constraint active, but current status is not 'In Review'. No transition needed.`);
                 }
               } else {
                 if (currentStatusOptionId !== IN_REVIEW_OPTION_ID) {
                   targetOptionId = IN_REVIEW_OPTION_ID;
+                  console.log(`   🔵 All linked PRs open & ready. Flagging promotion to 'In Review'.`);
+                } else {
+                  console.log(`   ✔ Status is already 'In Review'. No transition needed.`);
                 }
               }
 
               if (!targetOptionId) continue;
-              if (currentStatusOptionId === targetOptionId) continue;
 
+              // ✅ Execute Project Mutation via PAT
+              console.log(`   ⚙️ Executing status mutation...`);
               await userOctokit.graphql(`
                 mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $optionId:String!) {
                   updateProjectV2ItemFieldValue(
@@ -274,4 +288,7 @@ jobs:
                 fieldId: STATUS_FIELD_ID,
                 optionId: targetOptionId
               });
+
+              console.log(`✅ Successfully updated Project Status for Issue #${issue.number}`);
             }
+            console.log("\n🏁 Complete.");
