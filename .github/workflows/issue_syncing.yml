@@ -36,7 +36,7 @@ jobs:
               auth: process.env.USER_PROJECT_TOKEN
             });
 
-            // ✅ Resolve USER Project
+            // ✅ Resolve project
             const projectData = await github.graphql(`
               query($login: String!, $number: Int!) {
                 user(login: $login) {
@@ -81,57 +81,80 @@ jobs:
                 o.name?.toLowerCase().includes("review")
               )?.id;
 
-            if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) return;
-
-            // ✅ Event-aware targeting
-            let issuesToProcess = [];
-
-            if (context.eventName === 'issues' || context.eventName === 'issue_comment') {
-              const { data: freshIssue } = await github.rest.issues.get({
+            const issuesToProcess = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
                 owner: ISSUE_OWNER,
                 repo: ISSUE_REPO,
-                issue_number: context.payload.issue.number
-              });
-
-              if (freshIssue.state === 'open') {
-                issuesToProcess.push(freshIssue);
+                state: "open",
               }
-            } else {
-              issuesToProcess = await github.paginate(
-                github.rest.issues.listForRepo,
-                {
-                  owner: ISSUE_OWNER,
-                  repo: ISSUE_REPO,
-                  state: "open",
-                }
-              );
-            }
+            );
 
             for (const issue of issuesToProcess) {
 
               console.log(`Checking issue #${issue.number}`);
 
-              const timeline = await github.paginate(
-                github.rest.issues.listEventsForTimeline,
-                {
+              // ✅ FULL PAGINATED TIMELINE FETCH
+              let hasNextPage = true;
+              let endCursor = null;
+              let linkedPRs = [];
+
+              while (hasNextPage) {
+
+                const timelinePage = await github.graphql(`
+                  query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
+                    repository(owner:$owner, name:$repo) {
+                      issue(number:$number) {
+                        timelineItems(
+                          first:50,
+                          after:$cursor,
+                          itemTypes:[CROSS_REFERENCED_EVENT, CONNECTED_EVENT]
+                        ) {
+                          pageInfo { hasNextPage endCursor }
+                          nodes {
+                            ... on CrossReferencedEvent {
+                              source {
+                                ... on PullRequest {
+                                  number
+                                  draft
+                                  merged
+                                  repository { name owner { login } }
+                                }
+                              }
+                            }
+                            ... on ConnectedEvent {
+                              subject {
+                                ... on PullRequest {
+                                  number
+                                  draft
+                                  merged
+                                  repository { name owner { login } }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                `, {
                   owner: ISSUE_OWNER,
                   repo: ISSUE_REPO,
-                  issue_number: issue.number,
-                  mediaType: { previews: ["mockingbird"] }
-                }
-              );
+                  number: issue.number,
+                  cursor: endCursor
+                });
 
-              // ✅ Deduplicated PR detection
-              const linkedPRs = [
-                ...new Map(
-                  timeline
-                    .filter(e => e.source?.issue?.pull_request)
-                    .map(e => {
-                      const pr = e.source.issue;
-                      return [`${pr.repository.owner.login}/${pr.repository.name}#${pr.number}`, pr];
-                    })
-                ).values()
-              ];
+                const items = timelinePage.repository.issue.timelineItems;
+
+                const prs = items.nodes
+                  .map(n => n.source || n.subject)
+                  .filter(Boolean);
+
+                linkedPRs.push(...prs);
+
+                hasNextPage = items.pageInfo.hasNextPage;
+                endCursor = items.pageInfo.endCursor;
+              }
 
               if (linkedPRs.length === 0) continue;
 
@@ -140,23 +163,12 @@ jobs:
 
               for (const pr of linkedPRs) {
 
-                const result = await github.request(
-                  "GET /repos/{owner}/{repo}/pulls/{pull_number}",
-                  {
-                    owner: pr.repository.owner.login,
-                    repo: pr.repository.name,
-                    pull_number: pr.number,
-                  }
-                );
-
-                const prData = result.data;
-
                 console.log(
-                  `PR ${pr.repository.owner.login}/${pr.repository.name}#${pr.number} | merged=${prData.merged} | draft=${prData.draft}`
+                  `PR ${pr.repository.owner.login}/${pr.repository.name}#${pr.number} | merged=${pr.merged} | draft=${pr.draft}`
                 );
 
-                if (!prData.merged) allMerged = false;
-                if (prData.draft) anyDraft = true;
+                if (!pr.merged) allMerged = false;
+                if (pr.draft) anyDraft = true;
               }
 
               if (allMerged) {
