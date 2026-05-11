@@ -36,9 +36,6 @@ jobs:
               auth: process.env.USER_PROJECT_TOKEN
             });
 
-            console.log("Starting sync...");
-
-            // ✅ Resolve User Project
             const projectData = await github.graphql(`
               query($login: String!, $number: Int!) {
                 user(login: $login) {
@@ -62,39 +59,32 @@ jobs:
             });
 
             const project = projectData.user.projectV2;
-            if (!project) {
-              console.log("Project not found.");
-              return;
-            }
+            if (!project) return;
 
             const PROJECT_ID = project.id;
 
             const statusField = project.fields.nodes
               .find(f => f.name?.toLowerCase() === "status");
 
-            if (!statusField) {
-              console.log("Status field not found.");
-              return;
-            }
+            if (!statusField) return;
 
             const STATUS_FIELD_ID = statusField.id;
 
             const IN_PROGRESS_OPTION_ID =
               statusField.options?.find(o =>
-                o.name?.toLowerCase().includes("progress")
+                o.name?.trim().toLowerCase() === "in progress"
               )?.id;
 
             const IN_REVIEW_OPTION_ID =
               statusField.options?.find(o =>
-                o.name?.toLowerCase().includes("review")
+                o.name?.trim().toLowerCase() === "in review"
               )?.id;
 
             if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) {
-              console.log("Status options missing.");
+              console.log("Status options not matched correctly.");
               return;
             }
 
-            // ✅ Always process all open issues
             const issuesToProcess = await github.paginate(
               github.rest.issues.listForRepo,
               {
@@ -104,13 +94,8 @@ jobs:
               }
             );
 
-            console.log(`Open issues found: ${issuesToProcess.length}`);
-
             for (const issue of issuesToProcess) {
 
-              console.log(`Checking issue #${issue.number}`);
-
-              // ✅ PAGINATED TIMELINE FETCH
               let hasNextPage = true;
               let endCursor = null;
               let linkedPRs = [];
@@ -168,7 +153,6 @@ jobs:
                 endCursor = items.pageInfo.endCursor;
               }
 
-              // ✅ Deduplicate PRs
               linkedPRs = [
                 ...new Map(
                   linkedPRs.map(pr => [
@@ -183,7 +167,6 @@ jobs:
               let allMerged = true;
               let anyDraft = false;
 
-              // ✅ Fetch real PR state via REST
               for (const pr of linkedPRs) {
 
                 const result = await github.request(
@@ -197,15 +180,10 @@ jobs:
 
                 const prData = result.data;
 
-                console.log(
-                  `PR ${pr.repository.owner.login}/${pr.repository.name}#${pr.number} | merged=${prData.merged} | draft=${prData.draft}`
-                );
-
                 if (!prData.merged) allMerged = false;
                 if (prData.draft) anyDraft = true;
               }
 
-              // ✅ Close issue only if ALL PRs merged
               if (allMerged) {
                 await github.rest.issues.update({
                   owner: ISSUE_OWNER,
@@ -213,11 +191,9 @@ jobs:
                   issue_number: issue.number,
                   state: "closed",
                 });
-                console.log(`Closed issue #${issue.number}`);
                 continue;
               }
 
-              // ✅ Fetch project item
               const itemData = await github.graphql(`
                 query($owner:String!, $repo:String!, $number:Int!) {
                   repository(owner:$owner, name:$repo) {
@@ -242,7 +218,6 @@ jobs:
 
               if (!projectItem) continue;
 
-              // ✅ Fetch current status
               const statusData = await github.graphql(`
                 query($itemId: ID!) {
                   node(id: $itemId) {
@@ -267,14 +242,11 @@ jobs:
 
               let targetOptionId = null;
 
-              // ✅ ID‑based state machine
               if (anyDraft) {
-                // Downgrade only if currently In Review
                 if (currentStatusOptionId === IN_REVIEW_OPTION_ID) {
                   targetOptionId = IN_PROGRESS_OPTION_ID;
                 }
               } else {
-                // Promote if not already In Review
                 if (currentStatusOptionId !== IN_REVIEW_OPTION_ID) {
                   targetOptionId = IN_REVIEW_OPTION_ID;
                 }
@@ -302,8 +274,4 @@ jobs:
                 fieldId: STATUS_FIELD_ID,
                 optionId: targetOptionId
               });
-
-              console.log(`Updated status for issue #${issue.number}`);
             }
-
-            console.log("Sync complete.");
