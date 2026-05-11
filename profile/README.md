@@ -17,7 +17,7 @@ You can track My Plans, Progress, etc. at the Dedicated ["Kanban Board"](https:/
 Also You [can suggest Products](https://github.com/Amirhan-Taipovjan-Greatest-I/.github/issues) to translate or give a Reminder to Me about some already translated Products being updated that they require re-translating or additional translating.
 ### Tatar Proofreader.
 Currently a Proofreader for Tatar Language on such ⏳💯official Projects as:
-- ⏳The Minecraft Game (and its Launcher),
+- ⏳The Minecraft:Java Edition Game (and its Launcher),
 - ⏳NameMC Site,
 - ⏳BOINC Program and Site.
 
@@ -29,21 +29,22 @@ And such ⏳fan Projects as:
 Currently a Translator for Tatar Language on such ⏳💯official Projects as:
 - ⏳Aternos GmbH's (Aternos and Exaroton Services/Sites),
 - ⏳Capes.me Site,
-- ⏳Fabric Modloader,
+- ⏳Fabric ModLoader,
 - Minecraft Mods:
 - - ⏳Fabric API,
-- - Libraries like ⏳Cloth Config, ⏳lazy-language-loader, ⏳CompleteConfig ⏳MidnightLib, 💯owo-lib, 💯YACL,
+- - Libraries like 💯BetterConfig, ⏳Cloth Config, ⏳CompleteConfig ⏳MidnightLib, 💯owo-lib, 💯YACL,
 - - ⏳ModMenu,
 - - 💯Config Manager,
 - - ⏳Language Reload,
+- - ⏳lazy-language-loader,
 - - ⏳CIT Resewn,
 - - ⏳BetterF3,
 - - ⏳Emotecraft,
 - - 💯Plasmo Voice (and its 💯Addons) and ⏳Simple Voice Chat,
 - - ⏳Peek,
-- - 💯Stendhal,
+- - ⏳Stendhal,
 - - ⏳Screenshot Viewer,
-- - ⏳ViaFabric,
+- - 💯ViaFabric (and ⏳Plus Version),
 - - 💯Status,
 - - 💯VoiceMessages,
 - - 💯Vanilla Notebook,
@@ -53,6 +54,7 @@ Currently a Translator for Tatar Language on such ⏳💯official Projects as:
 - - [More research is needed]
 - Minecraft Plugins:
 - - 💯AuthMeReloaded,
+- - 💯BlueMap (i. e. its Web App for Self-Host),
 - - 💯GSit,
 - - 💯EastZombies,
 - - ⏳SkinsRestorer.
