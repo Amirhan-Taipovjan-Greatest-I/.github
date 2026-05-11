@@ -1,10 +1,6 @@
 name: Syncing Issues with Linked PRs and User Project
 
 on:
-  issues:
-    types: [opened, edited, milestoned, demilestoned]
-  issue_comment:
-    types: [created, edited]
   schedule:
     - cron: '0 */1 * * *'
   workflow_dispatch:
@@ -36,7 +32,9 @@ jobs:
               auth: process.env.USER_PROJECT_TOKEN
             });
 
-            // ✅ Resolve USER Project
+            console.log(`Event name: ${context.eventName}`);
+
+            // ✅ Resolve project
             const projectData = await github.graphql(`
               query($login: String!, $number: Int!) {
                 user(login: $login) {
@@ -60,15 +58,20 @@ jobs:
             });
 
             const project = projectData.user.projectV2;
-            if (!project) return;
+            if (!project) {
+              console.log("Project not found");
+              return;
+            }
 
             const PROJECT_ID = project.id;
 
             const statusField = project.fields.nodes
-              .filter(f => f && f.name)
-              .find(f => f.name.trim().toLowerCase() === "status");
+              .find(f => f.name?.toLowerCase() === "status");
 
-            if (!statusField) return;
+            if (!statusField) {
+              console.log("Status field not found");
+              return;
+            }
 
             const STATUS_FIELD_ID = statusField.id;
 
@@ -82,35 +85,26 @@ jobs:
                 o.name?.toLowerCase().includes("review")
               )?.id;
 
-            if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) return;
-
-            // ✅ Determine issues to process
-            let issuesToProcess = [];
-
-            if (context.eventName === 'issues' || context.eventName === 'issue_comment') {
-              const targetIssueNumber = context.payload.issue.number;
-
-              const { data: freshIssue } = await github.rest.issues.get({
-                owner: ISSUE_OWNER,
-                repo: ISSUE_REPO,
-                issue_number: targetIssueNumber
-              });
-
-              if (freshIssue.state === 'open') {
-                issuesToProcess.push(freshIssue);
-              }
-            } else {
-              issuesToProcess = await github.paginate(
-                github.rest.issues.listForRepo,
-                {
-                  owner: ISSUE_OWNER,
-                  repo: ISSUE_REPO,
-                  state: "open",
-                }
-              );
+            if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) {
+              console.log("Status options missing");
+              return;
             }
 
+            // ✅ ALWAYS fetch open issues
+            const issuesToProcess = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner: ISSUE_OWNER,
+                repo: ISSUE_REPO,
+                state: "open",
+              }
+            );
+
+            console.log(`Issues found: ${issuesToProcess.length}`);
+
             for (const issue of issuesToProcess) {
+
+              console.log(`Checking issue #${issue.number}`);
 
               const timeline = await github.paginate(
                 github.rest.issues.listEventsForTimeline,
@@ -159,10 +153,11 @@ jobs:
                   issue_number: issue.number,
                   state: "closed",
                 });
+                console.log(`Closed issue #${issue.number}`);
                 continue;
               }
 
-              // ✅ DIRECT PROJECT ITEM QUERY (No pagination issues)
+              // ✅ Get project item via issue linkage
               const itemData = await github.graphql(`
                 query($owner:String!, $repo:String!, $number:Int!) {
                   repository(owner:$owner, name:$repo) {
@@ -245,4 +240,6 @@ jobs:
                 fieldId: STATUS_FIELD_ID,
                 optionId: targetOptionId
               });
+
+              console.log(`Updated status for issue #${issue.number}`);
             }
