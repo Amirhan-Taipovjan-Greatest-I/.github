@@ -254,11 +254,11 @@ jobs:
 
               // ✅ STATE MACHINE
               if (anyDraft) {
-                if (currentStatusName === "in review") {
+                if (currentStatusName === "In Review") {
                   targetOptionId = IN_PROGRESS_OPTION_ID;
                 }
               } else {
-                if (currentStatusName !== "in review") {
+                if (currentStatusName !== "In Review") {
                   targetOptionId = IN_REVIEW_OPTION_ID;
                 }
               }
