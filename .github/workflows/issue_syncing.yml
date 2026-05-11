@@ -1,16 +1,15 @@
-# Was written by 'the Dark Side' and was Idea-Leaded by Me.
 name: Syncing Issues with Linked PRs and User Project
 
 on:
-  issues: # The Secondary Event that is needed for a Defined GitHub Action.
+  issues:
     types: [opened, edited, milestoned, demilestoned]
-  issue_comment: # The Secondary Event that is needed for a Defined GitHub Action. Especially I like commenting on Issues, etc.
+  issue_comment:
     types: [created, edited]
-  schedule: # The Main Event, do not touch.
-    - cron: '0 */1 * * *' # Change the "1" to any number of Hours... updates every "x" Hours.
+  schedule:
+    - cron: '0 */1 * * *'
   workflow_dispatch:
 
-permissions: # Permissions for GITHUB_TOKEN that generates every Time a GitHub Action runs.
+permissions:
   contents: read
   issues: write
   repository-projects: read
@@ -21,10 +20,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Syncing Issue Statuses with linked PR Statuses + Issues' Project Statuses depending on PR States.
+      - name: Syncing Issue Statuses with linked PR Statuses
         uses: actions/github-script@v7
         env:
-          USER_PROJECT_TOKEN: ${{ secrets.USER_PROJECT_TOKEN }} # Add the 'USER_PROJECT_TOKEN' Repository Secret in a Repo Settings.
+          USER_PROJECT_TOKEN: ${{ secrets.USER_PROJECT_TOKEN }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -33,12 +32,9 @@ jobs:
             const ISSUE_REPO = context.repo.repo;
             const PROJECT_NUMBER = 3;
 
-            // ✅ Secondary authenticated client (PAT)
             const userOctokit = new github.constructor({
-              auth: process.env.USER_PROJECT_TOKEN //This Token is a Classic PAT with full Project Permissions only.
+              auth: process.env.USER_PROJECT_TOKEN
             });
-
-            console.log(`Repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
 
             // ✅ Resolve USER Project
             const projectData = await github.graphql(`
@@ -88,64 +84,22 @@ jobs:
 
             if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) return;
 
-            // ✅ Pagination for unlimited project size
-            async function getAllProjectItems(projectId) {
-              let hasNextPage = true;
-              let endCursor = null;
-              let allItems = [];
-
-              while (hasNextPage) {
-                const data = await github.graphql(`
-                  query($projectId: ID!, $cursor: String) {
-                    node(id: $projectId) {
-                      ... on ProjectV2 {
-                        items(first: 100, after: $cursor) {
-                          pageInfo { hasNextPage endCursor }
-                          nodes {
-                            id
-                            content { ... on Issue { id } }
-                          }
-                        }
-                      }
-                    }
-                  }
-                `, { projectId, cursor: endCursor });
-
-                const items = data.node.items;
-                allItems.push(...items.nodes);
-
-                hasNextPage = items.pageInfo.hasNextPage;
-                endCursor = items.pageInfo.endCursor;
-              }
-
-              return allItems;
-            }
-
-            const projectItems = await getAllProjectItems(PROJECT_ID);
-
-            // ✅ DUAL-MODE TARGETING ENGINE
+            // ✅ Determine issues to process
             let issuesToProcess = [];
 
             if (context.eventName === 'issues' || context.eventName === 'issue_comment') {
-              // ⚡ Event-Driven Mode: Target ONLY the issue that changed
               const targetIssueNumber = context.payload.issue.number;
-              console.log(`⚡ Instant Sync triggered by event on Issue #${targetIssueNumber}`);
-              
-              try {
-                const { data: freshIssue } = await github.rest.issues.get({
-                  owner: ISSUE_OWNER,
-                  repo: ISSUE_REPO,
-                  issue_number: targetIssueNumber
-                });
-                if (freshIssue.state === 'open') {
-                  issuesToProcess.push(freshIssue);
-                }
-              } catch (e) {
-                console.log(`Failed to fetch fresh data for issue #${targetIssueNumber}: ${e.message}`);
+
+              const { data: freshIssue } = await github.rest.issues.get({
+                owner: ISSUE_OWNER,
+                repo: ISSUE_REPO,
+                issue_number: targetIssueNumber
+              });
+
+              if (freshIssue.state === 'open') {
+                issuesToProcess.push(freshIssue);
               }
             } else {
-              // ⏰ Fallback Polling Mode: Sync all open issues
-              console.log("⏰ Fallback Sync triggered by Schedule or Dispatch. Processing all open issues...");
               issuesToProcess = await github.paginate(
                 github.rest.issues.listForRepo,
                 {
@@ -156,11 +110,7 @@ jobs:
               );
             }
 
-            console.log(`Processing execution for ${issuesToProcess.length} issue(s).`);
-
             for (const issue of issuesToProcess) {
-
-              console.log(`Checking issue #${issue.number}`);
 
               const timeline = await github.paginate(
                 github.rest.issues.listEventsForTimeline,
@@ -172,7 +122,6 @@ jobs:
                 }
               );
 
-              // ✅ ROBUST LINKED PR DETECTION (Catches cross-referenced, connected, etc.)
               const linkedPRs = timeline
                 .filter(e => e.source?.issue?.pull_request)
                 .map(e => e.source.issue);
@@ -195,20 +144,14 @@ jobs:
 
                   const prData = result.data;
 
-                  if (!prData.merged) {
-                    allMerged = false;
-                  }
+                  if (!prData.merged) allMerged = false;
+                  if (prData.draft) anyDraft = true;
 
-                  if (prData.draft) {
-                    anyDraft = true;
-                  }
-                } catch (err) {
-                  console.log(`PR fetch failed for ${pr.repository.owner.login}/${pr.repository.name}#${pr.number}: ${err.message}`);
-                  allMerged = false; // Fail-safe: don't close if we can't verify
+                } catch {
+                  allMerged = false;
                 }
               }
 
-              // ✅ Close only if ALL PRs merged
               if (allMerged) {
                 await github.rest.issues.update({
                   owner: ISSUE_OWNER,
@@ -216,17 +159,34 @@ jobs:
                   issue_number: issue.number,
                   state: "closed",
                 });
-                console.log(`✅ Closed issue #${issue.number}`);
                 continue;
               }
 
-              const projectItem = projectItems.find(
-                item => item.content?.id === issue.node_id
-              );
+              // ✅ DIRECT PROJECT ITEM QUERY (No pagination issues)
+              const itemData = await github.graphql(`
+                query($owner:String!, $repo:String!, $number:Int!) {
+                  repository(owner:$owner, name:$repo) {
+                    issue(number:$number) {
+                      projectItems(first:20) {
+                        nodes {
+                          id
+                          project { id }
+                        }
+                      }
+                    }
+                  }
+                }
+              `, {
+                owner: ISSUE_OWNER,
+                repo: ISSUE_REPO,
+                number: issue.number
+              });
+
+              const projectItem = itemData.repository.issue.projectItems.nodes
+                .find(p => p.project.id === PROJECT_ID);
 
               if (!projectItem) continue;
 
-              // ✅ Get current status
               const statusData = await github.graphql(`
                 query($itemId: ID!) {
                   node(id: $itemId) {
@@ -248,28 +208,24 @@ jobs:
               const currentStatusValue = statusData.node.fieldValues.nodes
                 .find(v => v.field?.id === STATUS_FIELD_ID);
 
-              const currentStatusOptionId = currentStatusValue?.optionId;
-              const currentStatusName = currentStatusValue?.name?.toLowerCase() || "";
+              const currentStatusName =
+                currentStatusValue?.name?.toLowerCase() || "";
 
               let targetOptionId = null;
 
-              // ✅ FINAL STATE MACHINE
               if (anyDraft) {
-                // Only downgrade from In Review → In Progress (Protects Backlog/Ready)
                 if (currentStatusName === "in review") {
                   targetOptionId = IN_PROGRESS_OPTION_ID;
                 }
               } else {
-                // No drafts → promote to In Review (if not already)
                 if (currentStatusName !== "in review") {
                   targetOptionId = IN_REVIEW_OPTION_ID;
                 }
               }
 
               if (!targetOptionId) continue;
-              if (currentStatusOptionId === targetOptionId) continue;
+              if (currentStatusValue?.optionId === targetOptionId) continue;
 
-              // ✅ Update via PAT
               await userOctokit.graphql(`
                 mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $optionId:String!) {
                   updateProjectV2ItemFieldValue(
@@ -289,6 +245,4 @@ jobs:
                 fieldId: STATUS_FIELD_ID,
                 optionId: targetOptionId
               });
-
-              console.log(`✅ Updated status for issue #${issue.number}`);
             }
