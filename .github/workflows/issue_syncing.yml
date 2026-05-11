@@ -36,7 +36,9 @@ jobs:
               auth: process.env.USER_PROJECT_TOKEN
             });
 
-            // ✅ Resolve project
+            console.log("Starting sync...");
+
+            // ✅ Resolve User Project
             const projectData = await github.graphql(`
               query($login: String!, $number: Int!) {
                 user(login: $login) {
@@ -60,14 +62,20 @@ jobs:
             });
 
             const project = projectData.user.projectV2;
-            if (!project) return;
+            if (!project) {
+              console.log("Project not found.");
+              return;
+            }
 
             const PROJECT_ID = project.id;
 
             const statusField = project.fields.nodes
               .find(f => f.name?.toLowerCase() === "status");
 
-            if (!statusField) return;
+            if (!statusField) {
+              console.log("Status field not found.");
+              return;
+            }
 
             const STATUS_FIELD_ID = statusField.id;
 
@@ -81,6 +89,12 @@ jobs:
                 o.name?.toLowerCase().includes("review")
               )?.id;
 
+            if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) {
+              console.log("Status options missing.");
+              return;
+            }
+
+            // ✅ Always process all open issues
             const issuesToProcess = await github.paginate(
               github.rest.issues.listForRepo,
               {
@@ -90,11 +104,13 @@ jobs:
               }
             );
 
+            console.log(`Open issues found: ${issuesToProcess.length}`);
+
             for (const issue of issuesToProcess) {
 
               console.log(`Checking issue #${issue.number}`);
 
-              // ✅ PAGINATED TIMELINE (only fetch PR identifiers)
+              // ✅ PAGINATED TIMELINE FETCH
               let hasNextPage = true;
               let endCursor = null;
               let linkedPRs = [];
@@ -189,6 +205,7 @@ jobs:
                 if (prData.draft) anyDraft = true;
               }
 
+              // ✅ Close issue only if ALL PRs merged
               if (allMerged) {
                 await github.rest.issues.update({
                   owner: ISSUE_OWNER,
@@ -200,6 +217,7 @@ jobs:
                 continue;
               }
 
+              // ✅ Fetch project item
               const itemData = await github.graphql(`
                 query($owner:String!, $repo:String!, $number:Int!) {
                   repository(owner:$owner, name:$repo) {
@@ -224,6 +242,7 @@ jobs:
 
               if (!projectItem) continue;
 
+              // ✅ Fetch current status
               const statusData = await github.graphql(`
                 query($itemId: ID!) {
                   node(id: $itemId) {
@@ -232,7 +251,6 @@ jobs:
                         nodes {
                           ... on ProjectV2ItemFieldSingleSelectValue {
                             field { ... on ProjectV2SingleSelectField { id } }
-                            name
                             optionId
                           }
                         }
@@ -245,23 +263,25 @@ jobs:
               const currentStatusValue = statusData.node.fieldValues.nodes
                 .find(v => v.field?.id === STATUS_FIELD_ID);
 
-              const currentStatusName =
-                currentStatusValue?.name?.toLowerCase() || "";
+              const currentStatusOptionId = currentStatusValue?.optionId;
 
               let targetOptionId = null;
 
+              // ✅ ID‑based state machine
               if (anyDraft) {
-                if (currentStatusName === "in review") {
+                // Downgrade only if currently In Review
+                if (currentStatusOptionId === IN_REVIEW_OPTION_ID) {
                   targetOptionId = IN_PROGRESS_OPTION_ID;
                 }
               } else {
-                if (currentStatusName !== "in review") {
+                // Promote if not already In Review
+                if (currentStatusOptionId !== IN_REVIEW_OPTION_ID) {
                   targetOptionId = IN_REVIEW_OPTION_ID;
                 }
               }
 
               if (!targetOptionId) continue;
-              if (currentStatusValue?.optionId === targetOptionId) continue;
+              if (currentStatusOptionId === targetOptionId) continue;
 
               await userOctokit.graphql(`
                 mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $optionId:String!) {
@@ -285,3 +305,5 @@ jobs:
 
               console.log(`Updated status for issue #${issue.number}`);
             }
+
+            console.log("Sync complete.");
