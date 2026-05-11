@@ -36,8 +36,6 @@ jobs:
               auth: process.env.USER_PROJECT_TOKEN
             });
 
-            console.log(`Repository: ${ISSUE_OWNER}/${ISSUE_REPO}`);
-
             // ✅ Resolve USER Project
             const projectData = await github.graphql(`
               query($login: String!, $number: Int!) {
@@ -86,7 +84,7 @@ jobs:
 
             if (!IN_PROGRESS_OPTION_ID || !IN_REVIEW_OPTION_ID) return;
 
-            // ✅ Determine which issues to process
+            // ✅ Determine issues to process
             let issuesToProcess = [];
 
             if (context.eventName === 'issues' || context.eventName === 'issue_comment') {
@@ -114,8 +112,6 @@ jobs:
 
             for (const issue of issuesToProcess) {
 
-              console.log(`Checking issue #${issue.number}`);
-
               const timeline = await github.paginate(
                 github.rest.issues.listEventsForTimeline,
                 {
@@ -136,21 +132,33 @@ jobs:
               let anyDraft = false;
 
               for (const pr of linkedPRs) {
-                const result = await github.request(
-                  "GET /repos/{owner}/{repo}/pulls/{pull_number}",
-                  {
-                    owner: pr.repository.owner.login,
-                    repo: pr.repository.name,
-                    pull_number: pr.number,
+                try {
+                  const result = await github.request(
+                    "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+                    {
+                      owner: pr.repository.owner.login,
+                      repo: pr.repository.name,
+                      pull_number: pr.number,
+                    }
+                  );
+
+                  const prData = result.data;
+
+                  if (!prData.merged) {
+                    allMerged = false;
                   }
-                );
 
-                const prData = result.data;
+                  if (prData.draft) {
+                    anyDraft = true;
+                  }
 
-                if (!prData.merged) allMerged = false;
-                if (prData.draft) anyDraft = true;
+                } catch (err) {
+                  console.log(`PR fetch failed: ${err.message}`);
+                  allMerged = false;
+                }
               }
 
+              // ✅ Close only if ALL PRs merged
               if (allMerged) {
                 await github.rest.issues.update({
                   owner: ISSUE_OWNER,
@@ -162,25 +170,23 @@ jobs:
                 continue;
               }
 
-              // ✅ Get project item dynamically per issue
+              // ✅ Fetch project item properly (FIXED query)
               const itemData = await github.graphql(`
-                query($projectId: ID!, $issueId: ID!) {
+                query($projectId: ID!) {
                   node(id: $projectId) {
                     ... on ProjectV2 {
                       items(first: 100) {
                         nodes {
                           id
                           content {
-                            ... on Issue {
-                              id
-                            }
+                            ... on Issue { id }
                           }
                         }
                       }
                     }
                   }
                 }
-              `, { projectId: PROJECT_ID, issueId: issue.node_id });
+              `, { projectId: PROJECT_ID });
 
               const projectItem = itemData.node.items.nodes
                 .find(i => i.content?.id === issue.node_id);
